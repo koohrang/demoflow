@@ -1,0 +1,20 @@
+{
+  "name": "Demoflow",
+  "short_name": "Demoflow",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#F6F7FB",
+  "theme_color": "#1E2A4A",
+  "icons": [
+    {
+      "src": "icon-256.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    }
+  ]
+}

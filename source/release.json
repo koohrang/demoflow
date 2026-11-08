@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "feed": "https://raw.githubusercontent.com/koohrang/demoflow/main/version.json",
+  "released": "2026-11-08",
+  "notes": [
+    "New name and logo: Trailmark is now Demoflow.",
+    "Exact click positions with the optional Click Helper extension.",
+    "Back up and restore all your demos.",
+    "Zoom, arrows, boxes and labels, and trimming for movement clips.",
+    "Publish online with Netlify, branding, lead form, background music, subtitles and AI translation.",
+    "Updates install themselves from now on."
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "url": "Demoflow.html",
+  "sha256": "8ddde27b186cba4d18789b17895e40072f4192953c85095106f8ab8a9ceced23",
+  "size": 675385,
+  "notes": [
+    "New name and logo: Trailmark is now Demoflow.",
+    "Exact click positions with the optional Click Helper extension.",
+    "Back up and restore all your demos.",
+    "Zoom, arrows, boxes and labels, and trimming for movement clips.",
+    "Publish online with Netlify, branding, lead form, background music, subtitles and AI translation.",
+    "Updates install themselves from now on."
+  ],
+  "released": "2026-11-08"
+}

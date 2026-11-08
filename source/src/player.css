@@ -1,0 +1,138 @@
+/* Demoflow player. Every class is prefixed tmp- so it can be embedded anywhere. */
+.tmp-root {
+  --tmp-accent: #4F46E5;
+  --tmp-accent-ink: #fff;
+  --tmp-hot: #FFB21A;
+  --tmp-tip-bg: #fff;
+  --tmp-tip-ink: #1D2433;
+  --tmp-radius: 12px;
+  --tmp-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  position: relative; width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font: 400 15px/1.5 var(--tmp-font); color: var(--tmp-tip-ink);
+  -webkit-font-smoothing: antialiased; outline: none;
+}
+.tmp-root *, .tmp-root *::before, .tmp-root *::after { box-sizing: border-box; }
+.tmp-root.tmp-fit-width { height: auto; display: block; }
+.tmp-frame { position: relative; overflow: hidden; border-radius: 10px; background: #ECEEF5; box-shadow: 0 1px 2px rgba(20,28,52,.06), 0 12px 40px rgba(20,28,52,.16); }
+.tmp-root.tmp-flat .tmp-frame { border-radius: 0; box-shadow: none; }
+.tmp-stage { position: absolute; inset: 0; }
+.tmp-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; user-select: none; -webkit-user-drag: none; transition: opacity .22s ease; }
+.tmp-img.tmp-out { opacity: 0; }
+.tmp-blur { position: absolute; backdrop-filter: blur(9px) saturate(.9); -webkit-backdrop-filter: blur(9px); background: rgba(240,242,241,.12); border-radius: 4px; }
+
+/* Hotspot beacon */
+.tmp-beacon { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; z-index: 3; }
+.tmp-beacon .tmp-core { position: absolute; left: 14px; top: 14px; width: 16px; height: 16px; border-radius: 50%; background: var(--tmp-hot); box-shadow: 0 0 0 3px rgba(255,255,255,.95), 0 2px 8px rgba(0,0,0,.3); }
+.tmp-beacon .tmp-ring { position: absolute; left: 14px; top: 14px; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--tmp-hot); animation: tmp-ring 1.8s cubic-bezier(.2,.6,.3,1) infinite; }
+.tmp-beacon .tmp-ring + .tmp-ring { animation-delay: .9s; }
+.tmp-beacon:focus-visible .tmp-core { outline: 3px solid var(--tmp-accent); outline-offset: 3px; }
+@keyframes tmp-ring { from { transform: scale(1); opacity: .9; } to { transform: scale(3.4); opacity: 0; } }
+
+/* Spotlight */
+.tmp-spot { position: absolute; z-index: 2; border-radius: 8px; cursor: pointer; box-shadow: 0 0 0 2px var(--tmp-hot), 0 0 0 9999px rgba(12,22,20,.52); transition: all .3s ease; background: transparent; border: 0; padding: 0; }
+.tmp-spot:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+
+/* Area beacon: a pulsing outline around a whole region, nothing dimmed */
+.tmp-area { position: absolute; z-index: 2; border-radius: 10px; cursor: pointer; padding: 0; background: color-mix(in srgb, var(--tmp-hot) 10%, transparent); border: 2.5px solid var(--tmp-hot); box-shadow: 0 0 0 0 color-mix(in srgb, var(--tmp-hot) 55%, transparent); animation: tmp-area 1.8s ease-out infinite; }
+.tmp-area:hover { background: color-mix(in srgb, var(--tmp-hot) 18%, transparent); }
+.tmp-area:focus-visible { outline: 3px solid var(--tmp-accent); outline-offset: 3px; }
+@keyframes tmp-area { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tmp-hot) 55%, transparent); } 100% { box-shadow: 0 0 0 14px color-mix(in srgb, var(--tmp-hot) 0%, transparent); } }
+
+/* Recorded movement and video clips */
+.tmp-motion, .tmp-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; background: transparent; z-index: 5; cursor: pointer; }
+.tmp-motion { opacity: 0; transition: opacity .12s linear; }
+.tmp-motion.tmp-on { opacity: 1; }
+.tmp-motion.tmp-gone { opacity: 0; transition-duration: .16s; }
+.tmp-video { z-index: 1; cursor: default; }
+.tmp-tip.tmp-cap-only { padding: 12px 16px; pointer-events: none; }
+.tmp-skip { position: absolute; z-index: 6; animation: tmp-fadein .3s ease .4s both; right: 12px; bottom: 14px; border: 0; border-radius: 999px; padding: 7px 12px; background: rgba(20,28,52,.72); color: #fff; font: 600 12.5px/1 var(--tmp-font); cursor: pointer; backdrop-filter: blur(6px); }
+.tmp-skip:hover { background: rgba(20,28,52,.9); }
+.tmp-tip.tmp-cap { width: min(460px, calc(100% - 24px)); }
+
+@keyframes tmp-fadein { from { opacity: 0; } to { opacity: 1; } }
+
+/* Tooltip */
+.tmp-tip { position: absolute; z-index: 4; width: 300px; max-width: calc(100% - 24px); background: var(--tmp-tip-bg); color: var(--tmp-tip-ink); border-radius: var(--tmp-radius); box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 14px 38px rgba(10,20,18,.26); padding: 14px 16px 12px; opacity: 0; transform: translateY(4px); transition: opacity .2s ease, transform .2s ease; }
+.tmp-tip.tmp-in { opacity: 1; transform: none; }
+.tmp-tip .tmp-arrow { position: absolute; width: 14px; height: 14px; background: var(--tmp-tip-bg); transform: rotate(45deg); border-radius: 2px; }
+.tmp-tip .tmp-text { margin: 0; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.tmp-tip .tmp-text strong { font-weight: 650; }
+.tmp-tip .tmp-ctas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.tmp-foot { display: flex; align-items: center; gap: 6px; margin-top: 12px; }
+.tmp-count { flex: 1; font-size: 12.5px; color: color-mix(in srgb, var(--tmp-tip-ink) 58%, transparent); font-variant-numeric: tabular-nums; }
+.tmp-btn { appearance: none; border: 0; cursor: pointer; font: 600 13.5px/1 var(--tmp-font); padding: 9px 14px; border-radius: calc(var(--tmp-radius) * .66); background: var(--tmp-accent); color: var(--tmp-accent-ink); transition: filter .15s ease, transform .1s ease; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.tmp-btn:hover { filter: brightness(1.08); }
+.tmp-btn:active { transform: translateY(1px); }
+.tmp-btn:focus-visible { outline: 2px solid var(--tmp-accent); outline-offset: 2px; }
+.tmp-btn.tmp-secondary { background: color-mix(in srgb, var(--tmp-accent) 11%, transparent); color: var(--tmp-accent); }
+.tmp-btn.tmp-icon { padding: 8px 10px; background: transparent; color: color-mix(in srgb, var(--tmp-tip-ink) 70%, transparent); }
+.tmp-btn.tmp-icon:hover { background: color-mix(in srgb, var(--tmp-tip-ink) 7%, transparent); filter: none; }
+
+/* Chapter + end screens */
+.tmp-overlay { position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: 24px; opacity: 0; transition: opacity .25s ease; }
+.tmp-overlay.tmp-in { opacity: 1; }
+.tmp-overlay .tmp-bg { position: absolute; inset: -30px; background-size: cover; background-position: center; filter: blur(14px) saturate(.9); transform: scale(1.04); }
+.tmp-overlay .tmp-veil { position: absolute; inset: 0; background: color-mix(in srgb, var(--tmp-accent) 62%, rgba(8,16,14,.55)); }
+.tmp-card { position: relative; width: min(460px, 100%); background: var(--tmp-tip-bg); color: var(--tmp-tip-ink); border-radius: calc(var(--tmp-radius) * 1.33); padding: 26px 26px 20px; box-shadow: 0 24px 60px rgba(0,0,0,.28); text-align: left; }
+.tmp-card h2 { margin: 0 0 8px; font: 700 clamp(19px, 2.6vw, 25px)/1.2 var(--tmp-font); letter-spacing: -0.015em; }
+.tmp-card p { margin: 0; color: color-mix(in srgb, var(--tmp-tip-ink) 75%, transparent); }
+.tmp-card .tmp-choices { display: grid; gap: 8px; margin-top: 18px; }
+.tmp-card .tmp-choices .tmp-btn { justify-content: space-between; padding: 12px 14px; font-size: 14.5px; width: 100%; }
+.tmp-card .tmp-foot { margin-top: 16px; }
+
+/* Opening and closing cards */
+.tmp-opening .tmp-card, .tmp-closing .tmp-card { text-align: center; padding: 34px 32px 28px; width: min(500px, 100%); }
+.tmp-opening .tmp-card h2 { font-size: clamp(22px, 3.4vw, 32px); letter-spacing: -0.02em; margin-bottom: 10px; }
+.tmp-closing .tmp-card h2 { font-size: clamp(21px, 3vw, 28px); }
+.tmp-opening .tmp-card p, .tmp-closing .tmp-card p { max-width: 38ch; margin: 0 auto; }
+.tmp-opening .tmp-choices, .tmp-closing .tmp-choices { max-width: 320px; margin-left: auto; margin-right: auto; }
+.tmp-opening .tmp-choices .tmp-btn, .tmp-closing .tmp-choices .tmp-btn { justify-content: center; gap: 8px; }
+.tmp-meta { display: inline-block; margin: 0 0 12px; padding: 4px 10px; border-radius: 999px; background: color-mix(in srgb, var(--tmp-accent) 12%, transparent); color: var(--tmp-accent); font-size: 12.5px; font-weight: 600; }
+.tmp-opening .tmp-veil { background: linear-gradient(160deg, color-mix(in srgb, var(--tmp-accent) 80%, rgba(8,16,30,.7)), color-mix(in srgb, var(--tmp-accent) 45%, rgba(8,16,30,.75))); }
+
+/* Start screen */
+.tmp-start .tmp-play { width: 64px; height: 64px; border-radius: 50%; border: 0; cursor: pointer; background: var(--tmp-hot); display: grid; place-items: center; margin: 0 auto 14px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.tmp-start .tmp-play svg { margin-left: 4px; }
+.tmp-start .tmp-card { text-align: center; }
+
+/* Progress + controls */
+.tmp-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(0,0,0,.08); z-index: 7; }
+.tmp-progress i { display: block; height: 100%; width: 0; background: var(--tmp-accent); transition: width .3s ease; }
+.tmp-controls { position: absolute; top: 10px; right: 10px; z-index: 8; display: flex; gap: 4px; opacity: 0; transition: opacity .2s ease; }
+.tmp-frame:hover .tmp-controls, .tmp-controls:focus-within { opacity: 1; }
+.tmp-ctrl { width: 32px; height: 32px; border: 0; border-radius: 8px; cursor: pointer; display: grid; place-items: center; background: rgba(15,25,23,.62); color: #fff; backdrop-filter: blur(6px); }
+.tmp-ctrl:hover { background: rgba(15,25,23,.8); }
+.tmp-ctrl:focus-visible { outline: 2px solid #fff; }
+
+/* Small stages: tooltip docks to an edge */
+.tmp-docked .tmp-tip { left: 10px !important; right: 10px; width: auto; max-width: none; }
+.tmp-docked .tmp-tip .tmp-arrow { display: none; }
+.tmp-docked .tmp-tip .tmp-text { font-size: 14px; }
+
+.tmp-root:fullscreen { background: #0E1513; }
+.tmp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tmp-beacon .tmp-ring { animation: none; opacity: .5; transform: scale(1.8); }
+  .tmp-area { animation: none; }
+  .tmp-img, .tmp-tip, .tmp-overlay, .tmp-spot, .tmp-progress i { transition: none; }
+}
+/* Camera (zoom) layer: screenshots, blurs, annotations and hotspots move together. */
+.tmp-cam { position: absolute; inset: 0; transform-origin: 0 0; will-change: transform; }
+.tmp-cam .tmp-beacon { scale: calc(1 / var(--tmp-z, 1)); }
+.tmp-annos-wrap, .tmp-annos { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.tmp-annos svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.tmp-label { position: absolute; transform: translate(-50%, -50%); padding: .35em .75em; border-radius: 999px; font: 600 calc(var(--tmp-w, 900px) * .0155)/1.25 var(--tmp-font); white-space: nowrap; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+.tmp-brand { position: absolute; z-index: 7; max-height: 30px; max-width: 140px; object-fit: contain; pointer-events: none; filter: drop-shadow(0 1px 3px rgba(0,0,0,.18)); }
+.tmp-brand-tl { top: 12px; left: 14px; } .tmp-brand-bl { bottom: 12px; left: 14px; } .tmp-brand-br { bottom: 12px; right: 14px; }
+.tmp-root.tmp-docked .tmp-brand { max-height: 22px; }
+/* Lead form before the demo */
+.tmp-gate { display: grid; gap: 10px; margin-top: 16px; text-align: left; }
+.tmp-field { display: grid; gap: 4px; font: 600 12.5px/1.2 var(--tmp-font); color: color-mix(in srgb, var(--tmp-tip-ink) 80%, transparent); }
+.tmp-field input { font: 400 15px/1.3 var(--tmp-font); padding: 10px 12px; border-radius: calc(var(--tmp-radius) * .7); border: 1px solid color-mix(in srgb, var(--tmp-tip-ink) 22%, transparent); background: var(--tmp-tip-bg); color: var(--tmp-tip-ink); }
+.tmp-field input:focus { outline: 2px solid var(--tmp-accent); outline-offset: 1px; border-color: transparent; }
+.tmp-gate .tmp-btn { justify-content: center; padding: 12px 14px; font-size: 14.5px; margin-top: 4px; }
+.tmp-gate-err { color: #C42B32; font-size: 13px; min-height: 0; }
+.tmp-gate-err:empty { display: none; }
+.tmp-gate-note { font-size: 11.5px; color: color-mix(in srgb, var(--tmp-tip-ink) 60%, transparent); text-align: center; }
