@@ -1,4 +1,5 @@
-import { detectHelper } from './helper.js';
+import { detectHelper, watchHelper } from './helper.js';
+import { helperSetupSteps } from './helper-ui.js';
 import { h, icon, modal, toast } from './ui.js';
 import { ScreenRecorder, ClipRecorder, screenRecordingSupported, videoRecordingSupported } from './recorder.js';
 
@@ -78,37 +79,46 @@ export function openRecordDialog({ onDone, onSteps }) {
   const styleBox = h('div', { class: 'opt-grid', style: { gridTemplateColumns: '1fr 1fr', marginBottom: '12px' } },
     opt('click', 'cursor', 'Click-through demo', 'Viewers click a hotspot on each step to move on.'),
     canVideo ? opt('auto', 'film', 'Video walkthrough', 'No clicks: plays your screens and movement by itself, like a video.') : null);
-  // With the Click Helper, steps can follow your clicks instead of every screen change.
-  let trigger = 'manual';
+  // With the Click Helper, steps follow your clicks instead of every screen change.
   let triggerPref = '';
   try { triggerPref = localStorage.getItem('df.trigger') || ''; } catch { /* ignore */ }
   let hasHelper = false;
   const helperLine = h('div', { class: 'helper-line' }, h('span', { class: 'spin' }), 'Checking for the Click Helper…');
+  const setup = h('div', { class: 'helper-setup', hidden: true },
+    h('p', { class: 'modal-text' }, h('strong', null, 'One-time setup (about a minute): '), 'Chrome doesn’t let one tab see clicks in another, so Demoflow uses a small helper extension to turn your clicks into steps.'),
+    helperSetupSteps());
   const triggerBox = h('div', { class: 'trigger-box', hidden: true });
   const drawTrigger = () => {
-    const btn = (v, title, sub) => h('button', { type: 'button', class: 'trig', 'aria-pressed': String(trigger === v), onclick: () => { trigger = v; try { localStorage.setItem('df.trigger', v); } catch { /* ignore */ } drawTrigger(); } },
+    const btn = (v, title, sub, disabled) => h('button', { type: 'button', class: 'trig', disabled: !!disabled, 'aria-pressed': String(trigger === v), onclick: () => { trigger = v; try { localStorage.setItem('df.trigger', v); } catch { /* ignore */ } drawTrigger(); } },
       h('strong', null, title), h('small', null, sub));
     motionRow.hidden = style === 'auto' || trigger !== 'change'; // movement is always recorded unless steps follow screen changes
     triggerBox.replaceChildren(
       h('span', { class: 'field-label' }, 'Make a new step'),
       h('div', { class: 'trig-grid' },
-        hasHelper
-          ? btn('click', 'When I click', 'Each click becomes a step. Moving, hovering and scrolling are smooth video in between.')
-          : btn('manual', 'When I press Capture step', 'Press it just before each click. Everything else is smooth video in between.'),
+        btn('click', 'When I click', hasHelper ? 'Each click becomes a step. Moving, hovering and scrolling are smooth video in between.' : 'Needs the Click Helper (set it up above).', !hasHelper),
+        btn('manual', 'When I press Capture step', 'Press it in the floating controls just before each click.'),
         btn('change', 'Whenever the screen changes', 'Every new screen becomes a step, even without a click. Hovering can add extra steps.')));
   };
-  detectHelper(700).then((on) => {
+  const showHelper = (on) => {
+    hasHelper = on;
     helperLine.classList.toggle('on', on);
     helperLine.replaceChildren(icon(on ? 'check' : 'puzzle', 16), on
-      ? h('span', null, h('strong', null, 'Click Helper is on. '), 'Steps follow your clicks, and hotspots land exactly where you click.')
-      : h('span', null, h('strong', null, 'Click Helper not found. '), 'Demoflow can’t see clicks in another tab without it. Add it to make a step on every click automatically. ',
-        h('a', { href: '#/settings/helper', onclick: () => dlg.close() }, 'Set it up')));
-    hasHelper = on;
-    trigger = on ? (triggerPref === 'change' ? 'change' : 'click') : (triggerPref === 'change' ? 'change' : 'manual');
+      ? h('span', null, h('strong', null, 'Click Helper is on. '), 'Every click you make becomes a step, with the hotspot exactly where you clicked.')
+      : h('span', null, h('strong', null, 'Click Helper not installed. '), 'Without it, Demoflow can’t tell when you click, so steps are only made when you press Capture step.'));
+    setup.hidden = on;
+    if (on) trigger = triggerPref === 'change' ? 'change' : 'click';
+    else if (trigger === 'click' || !trigger) trigger = triggerPref === 'change' ? 'change' : 'manual';
     triggerBox.hidden = false; drawTrigger();
+  };
+  let trigger = '';
+  let stopWatch = null;
+  detectHelper(700).then((on) => {
+    showHelper(on);
+    if (!on) stopWatch = watchHelper(() => { showHelper(true); toast('Click Helper found. Your clicks will become steps.', { kind: 'ok' }); });
   });
   const dlg = modal({
     title: onSteps ? 'Record steps here' : 'Record a demo',
+    onClose: () => { if (stopWatch) stopWatch(); },
     body: h('div', null,
       h('ol', { class: 'trail', style: { marginTop: '6px' } },
         h('li', null, h('span', { class: 'n' }, '1'), h('div', null, h('strong', null, 'Open your app in another tab'))),
@@ -118,6 +128,7 @@ export function openRecordDialog({ onDone, onSteps }) {
       styleBox,
       motionRow,
       helperLine,
+      setup,
       triggerBox,
       h('p', { class: 'hint' }, 'Link opens a new tab? Click “Share this tab instead” at the top of it. Nothing is uploaded; everything stays on this computer.')),
 
@@ -127,6 +138,7 @@ export function openRecordDialog({ onDone, onSteps }) {
         motionPref = motion.checked;
         if (trigger === 'manual' || trigger === 'click') { try { localStorage.setItem('df.trigger', trigger); } catch { /* ignore */ } }
         try { localStorage.setItem('trailmark.motion', motionPref ? 'on' : 'off'); } catch { /* ignore */ }
+        if (stopWatch) stopWatch();
         dlg.close();
         await beginSteps({ onDone, onSteps, motion: style === 'auto' || trigger !== 'change' ? true : motion.checked, auto: style === 'auto', trigger });
       } },
@@ -167,6 +179,20 @@ function startError(e, retry) {
   }
   if (e && e.name === 'NotAllowedError') toast('Screen sharing was cancelled, so recording didn’t start.');
   else toast(`Recording couldn’t start: ${e && e.message || e}`, { kind: 'error', timeout: 7000 });
+}
+
+// The recording had no clicks or captured steps: say why, plainly.
+function noStepsHelp(trigger, skipped) {
+  const body = trigger === 'click'
+    ? (skipped
+      ? 'Your clicks were seen, but they happened in a different tab from the one you shared. Share the same tab you click in (or use “Share this tab instead” in Chrome’s bar when a link opens a new tab).'
+      : 'The Click Helper didn’t report any clicks from the tab you shared. Make sure you click inside that tab, and if you opened Demoflow from a file, turn on “Allow access to file URLs” for the Click Helper.')
+    : 'In this mode a step is only made when you press Capture step in the floating controls, and it wasn’t pressed. To have every click become a step automatically, set up the Click Helper (Settings → Click Helper, about a minute, once).';
+  modal({
+    title: 'No steps were recorded',
+    body: h('div', null, h('p', { class: 'modal-text' }, body), h('p', { class: 'modal-text' }, 'The video you recorded is kept in the demo, so nothing is lost.')),
+    actions: [{ label: 'OK', kind: 'btn-primary' }],
+  });
 }
 
 // Shared shell: in-page panel with preview, plus a floating controls window.
@@ -232,6 +258,11 @@ async function beginSteps({ onDone, onSteps, motion, auto, trigger = 'change' })
         const id = await rec.finish({ auto });
         ui.close();
         if (!id) { toast('No steps were captured, so nothing was saved.'); return; }
+        if (rec.explicit && rec.madeSteps === 0) {
+          noStepsHelp(trigger, rec.skippedClicks);
+          onDone(id);
+          return;
+        }
         toast(auto ? `Recorded ${rec.count} step${rec.count === 1 ? '' : 's'} as a video walkthrough. Press Preview to watch it.` : `Recorded ${rec.count} step${rec.count === 1 ? '' : 's'}. Drag any hotspot that’s off.`, { kind: 'ok', timeout: 6000 });
         onDone(id);
       }

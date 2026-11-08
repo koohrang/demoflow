@@ -531,7 +531,7 @@ a.app-version:hover { color: #fff; }
 .opt-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 .trigger-box { margin-top: 12px; }
 .trigger-box[hidden] { display: none; }
-.trig-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.trig-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 6px; }
 .trig { display: grid; gap: 4px; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; font: inherit; color: var(--ink); }
 .trig strong { font-size: 13.5px; }
 .trig small { font-size: 12px; color: var(--muted); line-height: 1.35; }
@@ -540,3 +540,7 @@ a.app-version:hover { color: #fff; }
 .rec-panel.rec-mini { background: none; pointer-events: none; place-items: end center; }
 .rec-panel.rec-mini .rec-card { display: none; }
 .rec-panel.rec-mini .rec-pill { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px; padding: 8px 14px; border-radius: 999px; background: var(--navy); color: #fff; font: 600 13px/1 var(--font); box-shadow: var(--shadow-pop); pointer-events: auto; }
+.helper-setup { margin: 8px 0 4px; padding: 12px 14px; border: 1px solid var(--line, #E3E6EF); border-radius: var(--r); background: #FFFBF0; }
+.helper-setup .modal-text { margin: 0; font-size: 13px; }
+.helper-setup .setup-steps { margin: 10px 0 0; }
+.trig:disabled { opacity: .5; cursor: not-allowed; }

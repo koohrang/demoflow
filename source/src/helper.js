@@ -31,6 +31,19 @@ export function detectHelper(ms = 600) {
   });
 }
 
+// Keeps asking until the extension answers (e.g. right after it's installed).
+// Returns a function that stops watching.
+export function watchHelper(cb, every = 1200) {
+  let stop = false;
+  const tick = async () => {
+    if (stop) return;
+    if (await detectHelper(500)) { if (!stop) cb(true); return; }
+    setTimeout(tick, every);
+  };
+  tick();
+  return () => { stop = true; };
+}
+
 export function onHelperEvent(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 export function setHelperRecording(on) { window.postMessage({ source: 'demoflow-app', type: 'recording', on: !!on }, '*'); }
 

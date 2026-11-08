@@ -135,6 +135,17 @@ export class ScreenRecorder {
     this.changeStartAt = 0;
   }
 
+  // One MediaRecorder for the whole session (used when the frame encoder isn't available).
+  _startFullRecorder() {
+    if (this.mrFull || this.stopped) return;
+    this.mime = this.mime || pickMime();
+    if (!this.mime) return;
+    try { this.mrFull = startMediaRecorder(this.stream, this.mime); this.mrFull.pt0 = performance.now(); } catch (e) { console.warn('Demoflow recorder', e); this.mrFull = null; }
+  }
+
+  // Steps made on purpose (clicks or Capture step), not the automatic first/last ones.
+  get madeSteps() { return this.steps.filter((s) => !s.start && !s.final).length; }
+
   _onHelper(ev) {
     if (this.stopped || this.finishing || !ev || typeof ev.t !== 'number') return;
     const c = { ...ev, pt: performance.now() - (Date.now() - ev.t) };
@@ -148,8 +159,11 @@ export class ScreenRecorder {
   // Click mode: the screen as it was when you clicked becomes a step.
   _clickStep(c) {
     if (this.surface !== 'browser') return;
-    const s = this.track && this.track.getSettings ? this.track.getSettings() : {};
-    if (s.width && s.height && c.vw && c.vh && Math.abs(c.vw / c.vh - s.width / s.height) / (s.width / s.height) > 0.04) return; // a click in another tab
+    // A click in some other (unshared) tab has a different page shape. Judge by
+    // the frames actually received: the track's reported size can be the size cap.
+    const f = this.latest && this.latest.small;
+    const ar = f ? f.w / f.h : 0;
+    if (ar && c.vw && c.vh && Math.abs(c.vw / c.vh - ar) / ar > 0.07) { this.skippedClicks = (this.skippedClicks || 0) + 1; return; }
     const last = this.steps[this.steps.length - 1];
     if (last && last.click && c.pt - last.click.pt < 400) return; // double-click
     const frame = this.prev || this.latest;
@@ -179,12 +193,15 @@ export class ScreenRecorder {
         const codec = await this.cw.start(this.track, { encode: this.motion, analyse: true, analyseEveryMs: 120, keepAll: this.motion && this.full });
         this.encoding = this.motion && !!codec;
         this.codec = codec;
+        // If the encoder gives up part-way, record the rest with MediaRecorder.
+        this.cw.onEncoder = (m) => { if (!m.codec) { this.encoding = false; if (this.explicit) this._startFullRecorder(); } };
       } catch (e) {
         console.warn('Trailmark capture worker', e);
         this.cw = null;
       }
     }
-    if (this.motion && !this.encoding) {
+    if (this.motion && !this.encoding && this.explicit) this._startFullRecorder();
+    else if (this.motion && !this.encoding) {
       // Fallback for browsers without WebCodecs: short MediaRecorder clips.
       this.mime = pickMime();
       this._rotate();
@@ -558,6 +575,17 @@ export class ScreenRecorder {
       const r = await this.cw.clip(-Infinity, Infinity, 1);
       if (r && r.blob) { this.fullVideo = { blob: r.blob, dur: r.duration }; first = r.first || 0; }
     }
+    if (!this.fullVideo && this.mrFull && this.tsOff != null) {
+      // Session video from MediaRecorder: its time 0 is when it started.
+      const mr = this.mrFull; this.mrFull = null;
+      await stopMediaRecorder(mr);
+      if (mr.chunks.length) {
+        const blob = new Blob(mr.chunks, { type: this.mime.split(';')[0] });
+        const dur = (await mediaDuration(blob)) || (endPt - mr.pt0) / 1000;
+        this.fullVideo = { blob, dur };
+        first = (mr.pt0 + this.tsOff) * 1000;
+      }
+    }
     this._stop();
     if (this.fullVideo) { this.fullVideo.id = uid('vid_'); await db.putBlob(this.fullVideo.id, this.fullVideo.blob); }
     const changes = this.changeTs || [];
@@ -620,7 +648,7 @@ export class ScreenRecorder {
     if (!this.clicks.length || this.surface !== 'browser' || r.leftAt == null) return null;
     const ar = shot.w / shot.h;
     const lo = prevLeft + 250, hi = r.leftAt + 250;
-    const fits = (c) => c.vw && c.vh && Math.abs(c.vw / c.vh - ar) / ar < 0.04;
+    const fits = (c) => c.vw && c.vh && Math.abs(c.vw / c.vh - ar) / ar < 0.07;
     const inWin = this.clicks.filter((c) => c.pt > lo && c.pt <= hi && fits(c));
     const click = inWin.filter((c) => c.kind !== 'type').pop();
     if (!click) return null;
@@ -640,6 +668,7 @@ export class ScreenRecorder {
     this.warm.forEach(stopMediaRecorder);
     this.warm = [];
     if (this.active) { stopMediaRecorder(this.active); this.active = null; }
+    if (this.mrFull) { stopMediaRecorder(this.mrFull); this.mrFull = null; }
     try { this.reader && this.reader.cancel(); } catch { /* ignore */ }
     if (this.pending && this.pending.drop) { this.pending.drop(); this.pending = null; }
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());

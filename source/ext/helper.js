@@ -1,9 +1,11 @@
 // Runs in every tab. In the Demoflow tab it acts as a bridge; in other tabs it
 // reports clicks (position, the clicked element's name and box) to the bridge.
 (function () {
-  if (window.__demoflowHelper) return;
-  window.__demoflowHelper = true;
-  const VERSION = '1.0.0';
+  // The newest copy wins: after an update (or when added to an open tab twice),
+  // older copies in this page go quiet.
+  const gen = window.__demoflowHelperGen = (window.__demoflowHelperGen || 0) + 1;
+  const alive = () => { if (window.__demoflowHelperGen !== gen) return false; try { return !!chrome.runtime.id; } catch (e) { return false; } };
+  const VERSION = '1.1.0';
   const send = (msg) => { try { chrome.runtime.sendMessage(msg).catch(() => {}); } catch (e) { /* extension reloaded */ } };
   const isApp = () => document.documentElement && document.documentElement.hasAttribute('data-demoflow');
 
@@ -11,12 +13,12 @@
     const hello = () => window.postMessage({ source: 'demoflow-helper', type: 'hello', version: VERSION }, '*');
     send({ t: 'bridge' });
     window.addEventListener('message', (e) => {
-      if (e.source !== window || !e.data || e.data.source !== 'demoflow-app') return;
+      if (e.source !== window || !e.data || e.data.source !== 'demoflow-app' || !alive()) return;
       if (e.data.type === 'recording') send({ t: 'recording', on: !!e.data.on });
       else if (e.data.type === 'ping') { send({ t: 'bridge' }); hello(); }
     });
     chrome.runtime.onMessage.addListener((m) => {
-      if (m && m.t === 'event') window.postMessage({ source: 'demoflow-helper', type: 'event', ev: m.ev }, '*');
+      if (m && m.t === 'event' && alive()) window.postMessage({ source: 'demoflow-helper', type: 'event', ev: m.ev }, '*');
     });
     hello();
   }
@@ -48,7 +50,7 @@
 
   function reporter() {
     window.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || !e.isTrusted) return;
+      if (e.button !== 0 || !e.isTrusted || !alive()) return;
       const d = describe(e.target);
       send({ t: 'click', ev: {
         t: Date.now(), x: e.clientX / innerWidth, y: e.clientY / innerHeight, vw: innerWidth, vh: innerHeight,
@@ -57,6 +59,7 @@
     }, true);
     window.addEventListener('change', (e) => {
       const el = e.target;
+      if (!alive()) return;
       if (!el || !/^(input|textarea)$/i.test(el.tagName)) return;
       const type = (el.type || '').toLowerCase();
       if (/password|hidden|checkbox|radio|file/.test(type)) return;

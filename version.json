@@ -1,13 +1,14 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "url": "Demoflow.html",
-  "sha256": "d493dc03ac1384abca2d50a2ab08c9a1b84f3693c8cbb1bb0450ce2b46969b1f",
-  "size": 693117,
+  "sha256": "b584154ab32cf79b3f4b3241c244df04531a57767b084b2b8eb96a93828aa93b",
+  "size": 701051,
   "notes": [
-    "Recording now only shares a Chrome tab, never your whole screen, so Demoflow\u2019s own controls are never in the video.",
-    "No more steps you didn\u2019t make: without the Click Helper, steps come only from \u201cCapture step\u201d; with it, only from your clicks.",
-    "The box in the middle is gone once the floating controls open, and it no longer shows a live preview.",
-    "Smoother capture on high-resolution (Retina) screens."
+    "Fixed: recordings made without the Click Helper ended up with no steps. The Record window now shows the one-time Click Helper setup and notices the moment it's installed, with no reload.",
+    "Click Helper 1.1: starts working in tabs that are already open as soon as you install it.",
+    "Fixed: on some screens (like Retina Macs) clicks could be ignored because the tab's shape was misread.",
+    "Video is now recorded with the most reliable encoder first, and switches to a backup recorder if one fails, so the video between steps is never lost.",
+    "If a recording ends with no steps, Demoflow explains why and keeps your video."
   ],
   "released": "2026-11-08"
 }

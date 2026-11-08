@@ -31,37 +31,62 @@ function captureWorkerMain() {
   const FULL_LIMIT = 700 * 1024 * 1024; // stop keeping the full session beyond this
   let bytes = 0;
 
+  let tries = [], tryIdx = 0, encW = 0, encH = 0;
   async function setupEncoder(width, height, maxW) {
     const scale = Math.min(1, maxW / width);
-    const w = Math.max(2, Math.round(width * scale / 2) * 2);
-    const h = Math.max(2, Math.round(height * scale / 2) * 2);
-    const tries = [
-      ['vp09.00.10.08', 'V_VP9', 'prefer-hardware'],
-      ['vp8', 'V_VP8', 'prefer-hardware'],
+    encW = Math.max(2, Math.round(width * scale / 2) * 2);
+    encH = Math.max(2, Math.round(height * scale / 2) * 2);
+    // VP8 in software first: it works everywhere and keeps up in real time.
+    // Hardware VP9 is often reported as available but then fails on Macs.
+    tries = [
       ['vp8', 'V_VP8', 'prefer-software'],
+      ['vp8', 'V_VP8', 'no-preference'],
       ['vp09.00.10.08', 'V_VP9', 'prefer-software'],
+      ['vp09.00.10.08', 'V_VP9', 'prefer-hardware'],
     ];
-    for (const [codec, webm, hw] of tries) {
-      const c = { codec, width: w, height: h, bitrate: BITRATE, framerate: 30, latencyMode: 'realtime', hardwareAcceleration: hw };
+    tryIdx = 0;
+    return nextEncoder();
+  }
+
+  // Configure the next encoder that works. Called again if one fails mid-way:
+  // what it had made can't be mixed with another codec, so start over cleanly.
+  async function nextEncoder() {
+    while (tryIdx < tries.length) {
+      const [codec, webm, hw] = tries[tryIdx++];
+      const c = { codec, width: encW, height: encH, bitrate: BITRATE, framerate: 30, latencyMode: 'realtime', hardwareAcceleration: hw };
       try {
         const r = await VideoEncoder.isConfigSupported(c);
         if (!r.supported) continue;
         const e = new VideoEncoder({
           output: (chunk) => {
+            if (e !== enc) return;
             const data = new Uint8Array(chunk.byteLength);
             chunk.copyTo(data);
             chunks.push({ ts: chunk.timestamp, key: chunk.type === 'key', data });
             bytes += data.length;
             if (keepAll && bytes > FULL_LIMIT) { keepAll = false; self.postMessage({ type: 'fullLost' }); }
           },
-          error: () => { failed = true; },
+          error: () => { if (e === enc) encoderFailed(); },
         });
         e.configure(c);
-        enc = e; cfg = c; codecName = webm;
+        enc = e; cfg = c; codecName = webm; failed = false;
         return `${codec} (${hw.replace('prefer-', '')})`;
       } catch (err) { /* try the next one */ }
     }
+    enc = null; failed = true;
     return '';
+  }
+
+  let switching = false;
+  async function encoderFailed() {
+    if (switching) return;
+    switching = true; failed = true;
+    try { if (enc && enc.state !== 'closed') enc.close(); } catch (err) { /* ignore */ }
+    enc = null;
+    chunks = []; bytes = 0; lastKeyTs = -Infinity;
+    const name = await nextEncoder();
+    self.postMessage({ type: 'encoder', codec: name, restarted: true });
+    switching = false;
   }
 
   function encode(frame) {
@@ -77,7 +102,7 @@ function captureWorkerMain() {
       ctx.drawImage(frame, 0, 0, cfg.width, cfg.height);
       own = src = new VideoFrame(canvas, { timestamp: ts });
     }
-    try { enc.encode(src, { keyFrame: key }); } catch (err) { failed = true; }
+    try { enc.encode(src, { keyFrame: key }); } catch (err) { encoderFailed(); }
     if (own) own.close();
   }
 
@@ -196,6 +221,7 @@ export class CaptureWorker {
       else if (m.type === 'ready') this._resolve('ready', m);
       else if (m.type === 'clip') this._resolve('clip' + m.id, m);
       else if (m.type === 'snap') this._resolve('snap' + m.id, m.bmp);
+      else if (m.type === 'encoder') { this.codec = m.codec; this.restarted = true; if (this.onEncoder) this.onEncoder(m); }
       else if (m.type === 'fullLost') { this.fullLost = true; if (this.onFullLost) this.onFullLost(); }
       else if (m.type === 'stopped') this._resolve('stopped', m);
     };

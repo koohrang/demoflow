@@ -5,7 +5,8 @@ import { db, collectGarbage } from './db.js';
 import { exportBackup, importBackup } from './backup.js';
 import { topnav } from './nav.js';
 import { APP_VERSION, checkForUpdate, storedUpdate, removeStoredUpdate, installFromFile, restartApp, feedUrl, cmpVersion } from './update.js';
-import { detectHelper, helperZip, helperVersion } from './helper.js';
+import { detectHelper, helperVersion, watchHelper } from './helper.js';
+import { helperSetupSteps } from './helper-ui.js';
 import { downloadBlob } from './ui.js';
 
 export async function renderSettings(root, section) {
@@ -183,21 +184,17 @@ export async function renderSettings(root, section) {
 
   /* Click Helper */
   const helperState = h('div', { class: 'helper-line' }, h('span', { class: 'spin' }), 'Looking for the Click Helper…');
-  detectHelper(800).then((on) => {
+  const showHelper = (on) => {
     helperState.classList.toggle('on', on);
-    helperState.replaceChildren(icon(on ? 'check' : 'puzzle', 16), on ? h('span', null, h('strong', null, 'Installed and working. '), `Version ${helperVersion()}. Recordings get exact hotspots.`) : h('span', null, h('strong', null, 'Not installed in this browser yet.')));
-  });
+    helperState.replaceChildren(icon(on ? 'check' : 'puzzle', 16), on ? h('span', null, h('strong', null, 'Installed and working. '), `Version ${helperVersion()}. Each click you make while recording becomes a step.`) : h('span', null, h('strong', null, 'Not installed in this browser yet. '), 'Follow the steps below; this line turns green by itself.'));
+  };
+  detectHelper(800).then((on) => { showHelper(on); if (!on) watchHelper(() => showHelper(true)); });
   const helperPanel = h('section', { class: 'panel', id: 'helper' },
     h('h2', null, 'Click Helper'),
-    h('p', null, 'A tiny optional Chrome extension. While you record, it tells Demoflow exactly where you clicked and what you clicked on, so hotspots land in the right place and tooltips name the button. It does nothing when you aren’t recording and sends nothing off your computer.'),
+    h('p', null, 'A tiny Chrome extension that lets Demoflow see your clicks in the tab you record. With it, every click becomes a step, with the hotspot exactly where you clicked. It does nothing when you aren’t recording and sends nothing off your computer.'),
     helperState,
-    h('ol', { class: 'setup-steps' },
-      h('li', null, h('button', { class: 'btn btn-outline btn-sm', type: 'button', onclick: async () => downloadBlob(await helperZip(), 'demoflow-click-helper.zip') }, icon('download', 15), 'Download the Click Helper'), ' and unzip it.'),
-      h('li', null, 'Open ', h('code', null, 'chrome://extensions'), ' and switch on ', h('strong', null, 'Developer mode'), ' (top right).'),
-      h('li', null, 'Click ', h('strong', null, 'Load unpacked'), ' and pick the ', h('code', null, 'demoflow-click-helper'), ' folder.'),
-      h('li', null, 'Click ', h('strong', null, 'Details'), ' on the Click Helper and turn on ', h('strong', null, 'Allow access to file URLs'), ', so it can talk to this file.'),
-      h('li', null, 'Reload this page. The line above turns green.')),
-    h('p', { class: 'help' }, 'Works when you share a browser tab (not a whole window or screen).'));
+    helperSetupSteps(),
+    h('p', { class: 'help' }, 'Works when you share a Chrome tab (not a whole window or screen).'));
 
   /* Publishing */
   const publishPanel = h('section', { class: 'panel', id: 'publish' },
