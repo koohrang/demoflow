@@ -1,4 +1,5 @@
 import { h, icon, modal, toast, downloadBlob, slug } from './ui.js';
+import { motionLength } from './model.js';
 import { buildTimeline, exportVideo, exportGif, videoFormat } from './exporter.js';
 import { standaloneHtml, voiceIsFresh, motionPlays, siteFiles } from './pack.js';
 import { db } from './db.js';
@@ -26,7 +27,7 @@ function estimate(demo) {
   for (const s of demo.steps) {
     const words = String(s.type === 'chapter' ? `${s.title} ${s.text}` : s.tooltip.text).split(/\s+/).filter(Boolean).length;
     if (s.type === 'video') t += (s.dur || 3) + 0.6;
-    else if (s.type === 'screen') t += (s.play === 'auto' ? Math.max(+s.hold || 0.8, motionPlays(s) ? 0 : 2.5) : 1.1 + Math.min(7.5, Math.max(2.4, 1.4 + words * 0.3))) + (motionPlays(s) ? Math.max(0.4, s.motion.dur - (s.motion.start || 0)) : 0);
+    else if (s.type === 'screen') t += (s.play === 'auto' ? Math.max(+s.hold || 0.8, motionPlays(s) ? 0 : 2.5) : 1.1 + Math.min(7.5, Math.max(2.4, 1.4 + words * 0.3))) + (motionPlays(s) ? Math.max(0.4, motionLength(s)) : 0);
     else t += Math.max(3.4, 1.6 + words * 0.3);
   }
   if (demo.settings.endScreen && demo.settings.endScreen.enabled !== false) t += 3;

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-demoflow-app="1.0.0">
+<html lang="en" data-demoflow-app="1.0.1">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#1E2A4A">
 <script>
 (function () {
-  window.DF_VERSION = "1.0.0";
+  window.DF_VERSION = "1.0.1";
   window.DF_FEED = "https://raw.githubusercontent.com/koohrang/demoflow/main/version.json";
   document.documentElement.setAttribute('data-demoflow', '1');
   function cmp(a, b) {
@@ -188,6 +188,7 @@
 .tmp-gate-err { color: #C42B32; font-size: 13px; min-height: 0; }
 .tmp-gate-err:empty { display: none; }
 .tmp-gate-note { font-size: 11.5px; color: color-mix(in srgb, var(--tmp-tip-ink) 60%, transparent); text-align: center; }
+.tmp-root.tmp-ctl-low .tmp-controls { top: auto; bottom: 14px; }
 
 :root {
   /* Palette from the Acme Analytics guided tour */
@@ -720,6 +721,13 @@ a.app-version:hover { color: #fff; }
 .pub-live small { color: #3C7A5E; }
 .textarea.code { font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; }
 .opt-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.trigger-box { margin-top: 12px; }
+.trigger-box[hidden] { display: none; }
+.trig-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.trig { display: grid; gap: 4px; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); cursor: pointer; font: inherit; color: var(--ink); }
+.trig strong { font-size: 13.5px; }
+.trig small { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.trig[aria-pressed="true"] { border-color: var(--indigo); box-shadow: 0 0 0 3px var(--indigo-tint); background: #FBFBFF; }
 
 </style>
 <script type="text/plain" id="tm-player-src">/*! Demoflow player — renders an interactive click-through demo.
@@ -1246,9 +1254,12 @@ a.app-version:hover { color: #fff; }
   Player.prototype._preloadMotion = function (step) {
     var m = step.motion;
     if (!m || !m.video || m.play === false) { this._pre = null; return; }
-    if (this._pre && this._pre.getAttribute('src') === m.video) return;
-    this._pre = this._motionVideo(m.video);
-    try { this._pre.load(); } catch (e) { /* ignore */ }
+    var t0 = Math.max(0, +m.start || 0);
+    if (this._pre && this._pre.getAttribute('src') === m.video && this._preAt === t0) return;
+    var v = this._pre = this._motionVideo(m.video);
+    this._preAt = t0;
+    try { v.load(); } catch (e) { /* ignore */ }
+    if (t0 > 0) v.addEventListener('loadedmetadata', function () { if (Math.abs(v.currentTime - t0) > 0.04) { try { v.currentTime = t0; } catch (e) { /* ignore */ } } }, { once: true });
   };
 
   Player.prototype._playMotion = function (m, done) {
@@ -1259,13 +1270,13 @@ a.app-version:hover { color: #fff; }
     this._dropMotion();
     this._setZoom(1, 0, 0, 350);
     var t0 = Math.max(0, +m.start || 0), t1 = m.end != null && +m.end > t0 ? +m.end : 0;
-    var v = (this._pre && this._pre.getAttribute('src') === m.video) ? this._pre : this._motionVideo(m.video);
+    var v = (this._pre && this._pre.getAttribute('src') === m.video && this._preAt === t0) ? this._pre : this._motionVideo(m.video);
     this._pre = null;
     var skip = el('button', 'tmp-skip', 'Skip');
     skip.type = 'button';
     var fin = function () {
       if (finished) return;
-      finished = true; clearTimeout(timer);
+      finished = true; clearTimeout(timer); if (poll) clearInterval(poll);
       if (self._token !== token) return;
       try { v.pause(); } catch (e) { /* ignore */ }
       skip.remove();
@@ -1281,19 +1292,29 @@ a.app-version:hover { color: #fff; }
     v.addEventListener('error', fin);
     v.addEventListener('click', fin);
     skip.addEventListener('click', function (e) { e.stopPropagation(); fin(); });
+    // Stop at the trim point. A recording has no new frames while the screen is
+    // still, so check the clock rather than waiting for the next frame.
+    var poll = null;
     if (t1) {
-      var watch = function () {
-        if (finished) return;
-        if (v.currentTime >= t1 - 0.02) { fin(); return; }
-        if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(watch); else setTimeout(watch, 30);
-      };
-      if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(watch); else v.addEventListener('timeupdate', watch);
+      poll = setInterval(function () {
+        if (finished || !v.isConnected && self._token !== token) { clearInterval(poll); return; }
+        if (v.currentTime >= t1 - 0.03) { clearInterval(poll); fin(); }
+      }, 20);
     }
-    try { v.currentTime = t0; } catch (e) { /* not seekable yet */ }
-    if (t0 > 0) v.addEventListener('loadedmetadata', function () { if (v.currentTime < t0) try { v.currentTime = t0; } catch (e) { /* ignore */ } }, { once: true });
     this.stage.append(v, skip);
     this._motionEl = v;
-    if (!this.paused) { var p = v.play(); if (p && p.catch) p.catch(function () { if (!self.paused) fin(); }); }
+    // Play only once the video sits at its start point, so no earlier frame flashes.
+    var go = function () {
+      if (finished || self._token !== token || self.paused) return;
+      var p = v.play(); if (p && p.catch) p.catch(function () { if (!self.paused) fin(); });
+    };
+    var ready = v.readyState >= 1 && !v.seeking && Math.abs(v.currentTime - t0) <= 0.04;
+    if (ready || t0 <= 0) { if (t0 <= 0 && v.currentTime > 0.04) { try { v.currentTime = 0; } catch (e) { /* ignore */ } } go(); }
+    else {
+      v.addEventListener('seeked', function once() { if (Math.abs(v.currentTime - t0) <= 0.05) { v.removeEventListener('seeked', once); go(); } });
+      var seek = function () { if (Math.abs(v.currentTime - t0) > 0.04 || !v.seeking) { try { v.currentTime = t0; } catch (e) { /* ignore */ } } };
+      if (v.readyState >= 1) seek(); else v.addEventListener('loadedmetadata', seek, { once: true });
+    }
     timer = setTimeout(function check() {
       if (self.paused) { timer = setTimeout(check, 1000); return; }
       fin();
@@ -1409,6 +1430,11 @@ a.app-version:hover { color: #fff; }
     if (step.play === 'auto') { this._renderAutoScreen(step, i); return; }
     var hs = step.hotspot || { x: 0.5, y: 0.5, style: 'beacon' };
     var style = hs.style || 'beacon';
+    // Keep the player's buttons off a hotspot in the top-right corner.
+    var hx = hs.x, hy = hs.y;
+    if (step.highlight && (style === 'area' || style === 'spotlight')) { hx = step.highlight.x + step.highlight.w; hy = step.highlight.y; }
+    var mz = this._map(hx, hy);
+    this.root.classList.toggle('tmp-ctl-low', style !== 'none' && mz.x * this._w > this._w - 190 && mz.y * this._h < 70);
     var act = function (e) { if (e) e.stopPropagation(); self._advance(step); };
     var label = (step.tooltip && step.tooltip.text) ? step.tooltip.text.replace(/\*\*/g, '') : 'Continue';
     if ((style === 'spotlight' || style === 'area') && step.highlight) {
@@ -1880,6 +1906,7 @@ a.app-version:hover { color: #fff; }
 .tmp-gate-err { color: #C42B32; font-size: 13px; min-height: 0; }
 .tmp-gate-err:empty { display: none; }
 .tmp-gate-note { font-size: 11.5px; color: color-mix(in srgb, var(--tmp-tip-ink) 60%, transparent); text-align: center; }
+.tmp-root.tmp-ctl-low .tmp-controls { top: auto; bottom: 14px; }
 </script>
 <script>
 /*! Demoflow player — renders an interactive click-through demo.
@@ -2406,9 +2433,12 @@ a.app-version:hover { color: #fff; }
   Player.prototype._preloadMotion = function (step) {
     var m = step.motion;
     if (!m || !m.video || m.play === false) { this._pre = null; return; }
-    if (this._pre && this._pre.getAttribute('src') === m.video) return;
-    this._pre = this._motionVideo(m.video);
-    try { this._pre.load(); } catch (e) { /* ignore */ }
+    var t0 = Math.max(0, +m.start || 0);
+    if (this._pre && this._pre.getAttribute('src') === m.video && this._preAt === t0) return;
+    var v = this._pre = this._motionVideo(m.video);
+    this._preAt = t0;
+    try { v.load(); } catch (e) { /* ignore */ }
+    if (t0 > 0) v.addEventListener('loadedmetadata', function () { if (Math.abs(v.currentTime - t0) > 0.04) { try { v.currentTime = t0; } catch (e) { /* ignore */ } } }, { once: true });
   };
 
   Player.prototype._playMotion = function (m, done) {
@@ -2419,13 +2449,13 @@ a.app-version:hover { color: #fff; }
     this._dropMotion();
     this._setZoom(1, 0, 0, 350);
     var t0 = Math.max(0, +m.start || 0), t1 = m.end != null && +m.end > t0 ? +m.end : 0;
-    var v = (this._pre && this._pre.getAttribute('src') === m.video) ? this._pre : this._motionVideo(m.video);
+    var v = (this._pre && this._pre.getAttribute('src') === m.video && this._preAt === t0) ? this._pre : this._motionVideo(m.video);
     this._pre = null;
     var skip = el('button', 'tmp-skip', 'Skip');
     skip.type = 'button';
     var fin = function () {
       if (finished) return;
-      finished = true; clearTimeout(timer);
+      finished = true; clearTimeout(timer); if (poll) clearInterval(poll);
       if (self._token !== token) return;
       try { v.pause(); } catch (e) { /* ignore */ }
       skip.remove();
@@ -2441,19 +2471,29 @@ a.app-version:hover { color: #fff; }
     v.addEventListener('error', fin);
     v.addEventListener('click', fin);
     skip.addEventListener('click', function (e) { e.stopPropagation(); fin(); });
+    // Stop at the trim point. A recording has no new frames while the screen is
+    // still, so check the clock rather than waiting for the next frame.
+    var poll = null;
     if (t1) {
-      var watch = function () {
-        if (finished) return;
-        if (v.currentTime >= t1 - 0.02) { fin(); return; }
-        if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(watch); else setTimeout(watch, 30);
-      };
-      if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(watch); else v.addEventListener('timeupdate', watch);
+      poll = setInterval(function () {
+        if (finished || !v.isConnected && self._token !== token) { clearInterval(poll); return; }
+        if (v.currentTime >= t1 - 0.03) { clearInterval(poll); fin(); }
+      }, 20);
     }
-    try { v.currentTime = t0; } catch (e) { /* not seekable yet */ }
-    if (t0 > 0) v.addEventListener('loadedmetadata', function () { if (v.currentTime < t0) try { v.currentTime = t0; } catch (e) { /* ignore */ } }, { once: true });
     this.stage.append(v, skip);
     this._motionEl = v;
-    if (!this.paused) { var p = v.play(); if (p && p.catch) p.catch(function () { if (!self.paused) fin(); }); }
+    // Play only once the video sits at its start point, so no earlier frame flashes.
+    var go = function () {
+      if (finished || self._token !== token || self.paused) return;
+      var p = v.play(); if (p && p.catch) p.catch(function () { if (!self.paused) fin(); });
+    };
+    var ready = v.readyState >= 1 && !v.seeking && Math.abs(v.currentTime - t0) <= 0.04;
+    if (ready || t0 <= 0) { if (t0 <= 0 && v.currentTime > 0.04) { try { v.currentTime = 0; } catch (e) { /* ignore */ } } go(); }
+    else {
+      v.addEventListener('seeked', function once() { if (Math.abs(v.currentTime - t0) <= 0.05) { v.removeEventListener('seeked', once); go(); } });
+      var seek = function () { if (Math.abs(v.currentTime - t0) > 0.04 || !v.seeking) { try { v.currentTime = t0; } catch (e) { /* ignore */ } } };
+      if (v.readyState >= 1) seek(); else v.addEventListener('loadedmetadata', seek, { once: true });
+    }
     timer = setTimeout(function check() {
       if (self.paused) { timer = setTimeout(check, 1000); return; }
       fin();
@@ -2569,6 +2609,11 @@ a.app-version:hover { color: #fff; }
     if (step.play === 'auto') { this._renderAutoScreen(step, i); return; }
     var hs = step.hotspot || { x: 0.5, y: 0.5, style: 'beacon' };
     var style = hs.style || 'beacon';
+    // Keep the player's buttons off a hotspot in the top-right corner.
+    var hx = hs.x, hy = hs.y;
+    if (step.highlight && (style === 'area' || style === 'spotlight')) { hx = step.highlight.x + step.highlight.w; hy = step.highlight.y; }
+    var mz = this._map(hx, hy);
+    this.root.classList.toggle('tmp-ctl-low', style !== 'none' && mz.x * this._w > this._w - 190 && mz.y * this._h < 70);
     var act = function (e) { if (e) e.stopPropagation(); self._advance(step); };
     var label = (step.tooltip && step.tooltip.text) ? step.tooltip.text.replace(/\*\*/g, '') : 'Continue';
     if ((style === 'spotlight' || style === 'area') && step.highlight) {
@@ -3418,7 +3463,7 @@ function captureWorkerMain() {
         const built = buildWebM({ codec: codecName, width: cfg.width, height: cfg.height, frames });
         if (built) { blob = built.blob; duration = built.duration; }
       }
-      self.postMessage({ type: 'clip', id: m.id, blob, duration, frames: frames.length });
+      self.postMessage({ type: 'clip', id: m.id, blob, duration, frames: frames.length, first: frames.length ? frames[0].ts : 0 });
     } else if (m.type === 'stop') {
       stopped = true;
       try { if (reader) reader.cancel(); } catch (err) { /* ignore */ }
@@ -3588,7 +3633,7 @@ return { db, uid, collectGarbage };
 __def('editor', function (__req) {
 'use strict';
 const { db, uid, collectGarbage } = __req('db');
-const { newScreenStep, newChapterStep, newVideoStep, newButton, stepVoiceText, DEFAULT_THEME, addCards, newOpeningCard, newClosingCard, THEMES, FONTS, ANNO_COLORS, newDemo } = __req('model');
+const { newScreenStep, newChapterStep, newVideoStep, newButton, stepVoiceText, DEFAULT_THEME, addCards, newOpeningCard, newClosingCard, THEMES, FONTS, ANNO_COLORS, newDemo, motionLength } = __req('model');
 const { h, icon, toast, menu, modal, confirmDialog, debounce, timeAgo, downloadBlob, slug } = __req('ui');
 const { blobUrl, loadSettings } = __req('store');
 const { fileToStepImage, shrinkImage } = __req('media');
@@ -3720,7 +3765,7 @@ async function renderEditor(root, demoId) {
       }
       const branches = (s.buttons || []).some((b) => b.action && b.action.type === 'step') || (s.next && s.next.type === 'step');
       const cap = s.type === 'chapter' ? (s.text || 'Section card')
-        : s.play === 'auto' ? ((s.caption && s.tooltip.text) ? s.tooltip.text.replace(/\*\*/g, '') : (motionPlays(s) ? `Plays ${secs(s.motion.dur)} of movement` : 'Shows, then moves on'))
+        : s.play === 'auto' ? ((s.caption && s.tooltip.text) ? s.tooltip.text.replace(/\*\*/g, '') : (motionPlays(s) ? `Plays ${secs(motionLength(s))} of movement` : 'Shows, then moves on'))
           : ((s.tooltip.text || '').replace(/\*\*/g, '') || (s.type === 'video' ? 'Video clip' : 'No tooltip text'));
       const li = h('li', {
         class: 'rail-item', 'aria-current': i === sel ? 'true' : 'false', draggable: 'true', tabindex: '0',
@@ -3799,6 +3844,12 @@ async function renderEditor(root, demoId) {
     if (demo.steps.length === 1) { toast('A demo needs at least one step.'); return; }
     const s = demo.steps[i];
     mutate(() => {
+      // Sections of one continuous recording: the step before takes over this
+      // step's movement, so the video stays smooth instead of jumping.
+      const prev = demo.steps.slice(0, i).reverse().find((x) => x.type === 'screen');
+      if (prev && prev.motion && s.motion && prev.motion.shared && s.motion.shared && prev.motion.videoId === s.motion.videoId && s.motion.end != null) {
+        prev.motion.end = s.motion.end;
+      }
       demo.steps.splice(i, 1);
       // Re-point anything that jumped to the deleted step.
       for (const x of demo.steps) {
@@ -3959,7 +4010,7 @@ async function renderEditor(root, demoId) {
 
     if (s.play === 'auto') {
       const playable = motionPlays(s);
-      canvasEl.append(h('div', { class: 'auto-chip' }, playable ? `Video only · ${secsShort(s.motion.dur)} of movement` : 'Video only'));
+      canvasEl.append(h('div', { class: 'auto-chip' }, playable ? `Video only · ${secsShort(motionLength(s))} of movement` : 'Video only'));
       if (s.caption && s.tooltip.text) {
         const cap = h('div', { class: 'tmp-tip tmp-cap tmp-cap-only' }, h('p', { class: 'tmp-text', html: TP().rich(s.tooltip.text) }));
         canvasEl.append(cap);
@@ -4442,19 +4493,25 @@ async function renderEditor(root, demoId) {
     const blocked = s.blurs && s.blurs.length;
     const vid = h('video', { class: 'motion-prev', muted: true, playsinline: true, controls: true, preload: 'metadata' });
     vid.muted = true;
-    blobUrl(m.videoId).then((u) => { if (u) vid.src = u; });
+    blobUrl(m.videoId).then((u) => { if (!u) return; vid.src = u; if (m.start > 0) vid.addEventListener('loadedmetadata', () => { try { vid.currentTime = m.start; } catch { /* ignore */ } }, { once: true }); });
     const full = +m.dur || 0;
     const t0 = +m.start || 0, t1 = m.end != null ? +m.end : full;
+    // A section of the full recording: let the sliders reach a little either side.
+    const lo = m.shared ? Math.max(0, Math.floor((m.origStart != null ? m.origStart : t0) - 3)) : 0;
+    const hi = m.shared ? Math.min(full, Math.ceil((m.origEnd != null ? m.origEnd : t1) + 3)) : full;
+    if (m.shared && m.origStart == null) { m.origStart = t0; m.origEnd = t1; }
     const len = Math.max(0, t1 - t0);
-    const summary = blocked ? 'Left out' : m.play === false ? 'Off' : secsShort(len) + (t0 > 0.05 || t1 < full - 0.05 ? ' (trimmed)' : '');
+    const trimmed = m.shared ? (m.origStart != null && (Math.abs(t0 - m.origStart) > 0.05 || Math.abs(t1 - m.origEnd) > 0.05)) : (t0 > 0.05 || t1 < full - 0.05);
+    const summary = blocked ? 'Left out' : m.play === false ? 'Off' : secsShort(len) + (trimmed ? ' (trimmed)' : '');
     const outS = h('output', null, secsShort(t0)), outE = h('output', null, secsShort(t1));
     const seek = (t) => { try { vid.currentTime = t; } catch { /* not loaded */ } };
     const trim = full > 0.3 ? h('div', { class: 'trim' },
-      field(h('span', null, 'Start at ', outS), h('input', { type: 'range', class: 'range', min: 0, max: full, step: 0.05, value: t0, 'aria-label': 'Clip start',
+      field(h('span', null, 'Start at ', outS), h('input', { type: 'range', class: 'range', min: lo, max: hi, step: 0.05, value: t0, 'aria-label': 'Clip start',
         oninput: (e) => { let v = +e.target.value; const end = m.end != null ? +m.end : full; if (v > end - 0.2) { v = Math.max(0, end - 0.2); e.target.value = v; } outS.textContent = secsShort(v); seek(v); mutate(() => { m.start = v; }, { coalesce: 'ts-' + s.id, render: 'rail' }); } })),
-      field(h('span', null, 'End at ', outE), h('input', { type: 'range', class: 'range', min: 0, max: full, step: 0.05, value: t1, 'aria-label': 'Clip end',
-        oninput: (e) => { let v = +e.target.value; const st = +m.start || 0; if (v < st + 0.2) { v = Math.min(full, st + 0.2); e.target.value = v; } outE.textContent = secsShort(v); seek(v); mutate(() => { m.end = v >= full - 0.02 ? null : v; }, { coalesce: 'te-' + s.id, render: 'rail' }); } })),
-      (t0 > 0.05 || t1 < full - 0.05) ? h('button', { class: 'link-btn', type: 'button', onclick: () => mutate(() => { m.start = 0; m.end = null; }) }, 'Undo trim') : null) : null;
+      field(h('span', null, 'End at ', outE), h('input', { type: 'range', class: 'range', min: lo, max: hi, step: 0.05, value: t1, 'aria-label': 'Clip end',
+        oninput: (e) => { let v = +e.target.value; const st = +m.start || 0; if (v < st + 0.2) { v = Math.min(full, st + 0.2); e.target.value = v; } outE.textContent = secsShort(v); seek(v); mutate(() => { m.end = !m.shared && v >= full - 0.02 ? null : v; }, { coalesce: 'te-' + s.id, render: 'rail' }); } })),
+      m.shared ? ((Math.abs(t0 - m.origStart) > 0.05 || Math.abs(t1 - m.origEnd) > 0.05) ? h('button', { class: 'link-btn', type: 'button', onclick: () => mutate(() => { m.start = m.origStart; m.end = m.origEnd; }) }, 'Undo trim') : null)
+        : (t0 > 0.05 || t1 < full - 0.05) ? h('button', { class: 'link-btn', type: 'button', onclick: () => mutate(() => { m.start = 0; m.end = null; }) }, 'Undo trim') : null) : null;
     return group('move', 'Movement video', summary, false,
       vid, trim,
       blocked ? help('Video can’t be blurred, so this clip is left out because the step has blurred areas.')
@@ -4560,7 +4617,7 @@ async function renderEditor(root, demoId) {
           field(h('span', null, 'Show the screenshot for ', holdOut),
             h('input', { type: 'range', min: 0, max: 5, step: 0.1, value: s.hold != null ? s.hold : 0.8, class: 'range', 'aria-label': 'Seconds before the movement plays',
               oninput: (e) => { holdOut.textContent = `${(+e.target.value).toFixed(1)} s`; mutate(() => { s.hold = +e.target.value; }, { coalesce: 'hold-' + s.id, render: 'rail' }); } })),
-          help(playable ? `Then its ${secsShort(s.motion.dur)} movement video plays.` : 'No movement video here, so it shows for at least 2.5 s.')),
+          help(playable ? `Then its ${secsShort(motionLength(s))} movement video plays.` : 'No movement video here, so it shows for at least 2.5 s.')),
         group('cap', 'Caption', s.caption ? 'On' : 'Off', false,
           h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!s.caption, onchange: (e) => mutate(() => { s.caption = e.target.checked; }) }), h('span', null, 'Show a caption')),
           s.caption ? h('textarea', { id: 'tip-text', class: 'textarea', rows: 2, 'aria-label': 'Caption text', placeholder: 'Shown at the bottom', oninput: (e) => mutate(() => { s.tooltip.text = e.target.value; }, { coalesce: 'tip-' + s.id, render: 'canvas' }) }, s.tooltip.text || '') : null),
@@ -4961,6 +5018,7 @@ return { renderEditor };
 __def('export-dialog', function (__req) {
 'use strict';
 const { h, icon, modal, toast, downloadBlob, slug } = __req('ui');
+const { motionLength } = __req('model');
 const { buildTimeline, exportVideo, exportGif, videoFormat } = __req('exporter');
 const { standaloneHtml, voiceIsFresh, motionPlays, siteFiles } = __req('pack');
 const { db } = __req('db');
@@ -4987,7 +5045,7 @@ function estimate(demo) {
   for (const s of demo.steps) {
     const words = String(s.type === 'chapter' ? `${s.title} ${s.text}` : s.tooltip.text).split(/\s+/).filter(Boolean).length;
     if (s.type === 'video') t += (s.dur || 3) + 0.6;
-    else if (s.type === 'screen') t += (s.play === 'auto' ? Math.max(+s.hold || 0.8, motionPlays(s) ? 0 : 2.5) : 1.1 + Math.min(7.5, Math.max(2.4, 1.4 + words * 0.3))) + (motionPlays(s) ? Math.max(0.4, s.motion.dur - (s.motion.start || 0)) : 0);
+    else if (s.type === 'screen') t += (s.play === 'auto' ? Math.max(+s.hold || 0.8, motionPlays(s) ? 0 : 2.5) : 1.1 + Math.min(7.5, Math.max(2.4, 1.4 + words * 0.3))) + (motionPlays(s) ? Math.max(0.4, motionLength(s)) : 0);
     else t += Math.max(3.4, 1.6 + words * 0.3);
   }
   if (demo.settings.endScreen && demo.settings.endScreen.enabled !== false) t += 3;
@@ -5161,15 +5219,21 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
 function words(s) { return String(s || '').trim().split(/\s+/).filter(Boolean).length; }
 
-function loadVideo(blob) {
+const videoUrls = new WeakMap();
+// at: seek there before the segment starts, so a section of a long recording plays at once.
+function loadVideo(blob, at = 0) {
   return new Promise((resolve) => {
     const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto';
-    const done = () => resolve(v.readyState >= 1 ? v : null);
-    v.addEventListener('loadeddata', done, { once: true });
+    let settled = false;
+    const done = () => { if (settled) return; settled = true; resolve(v.readyState >= 1 ? v : null); };
+    v.addEventListener('loadeddata', () => {
+      if (at > 0.05) { v.addEventListener('seeked', done, { once: true }); try { v.currentTime = at; } catch { done(); } } else done();
+    }, { once: true });
     v.addEventListener('error', () => resolve(null), { once: true });
-    setTimeout(done, 5000);
-    v.src = URL.createObjectURL(blob);
+    setTimeout(done, 6000);
+    if (!videoUrls.has(blob)) videoUrls.set(blob, URL.createObjectURL(blob));
+    v.src = videoUrls.get(blob);
   });
 }
 
@@ -5182,6 +5246,7 @@ async function buildTimeline(demo, { width = 1280, cursor = true, withAudio = tr
   const H = Math.round(W / aspect / 2) * 2;
   const images = new Map();
   const blurred = new Map();
+  const blobCache = new Map();
   let actx = null;
   const segs = [];
   let t = 0;
@@ -5222,8 +5287,9 @@ async function buildTimeline(demo, { width = 1280, cursor = true, withAudio = tr
       prevImg = img;
       }
       if (withVideo && motionPlays(s)) {
-        const vb = await db.getBlob(s.motion.videoId);
-        const video = vb ? await loadVideo(vb) : null;
+        const vb = blobCache.get(s.motion.videoId) || await db.getBlob(s.motion.videoId);
+        if (vb) blobCache.set(s.motion.videoId, vb);
+        const video = vb ? await loadVideo(vb, s.motion.start || 0) : null;
         if (video) {
           const endAt = s.motion.end != null && +s.motion.end > (s.motion.start || 0) ? +s.motion.end : (s.motion.dur || 1);
           const dur = Math.max(0.2, endAt - (s.motion.start || 0));
@@ -6645,7 +6711,16 @@ function stepVoiceText(step) {
 
 function screenSteps(demo) { return demo.steps.filter((s) => s.type === 'screen'); }
 
-return { DEFAULT_THEME, THEMES, FONTS, ANNO_COLORS, newDemo, newScreenStep, newVideoStep, newChapterStep, newOpeningCard, newClosingCard, addCards, newButton, describeStep, stepVoiceText, screenSteps };
+// Seconds of movement a step actually plays (after trimming).
+function motionLength(step) {
+  const m = step && step.motion;
+  if (!m) return 0;
+  const start = +m.start || 0;
+  const end = m.end != null && +m.end > start ? +m.end : (+m.dur || 0);
+  return Math.max(0, end - start);
+}
+
+return { DEFAULT_THEME, THEMES, FONTS, ANNO_COLORS, newDemo, newScreenStep, newVideoStep, newChapterStep, newOpeningCard, newClosingCard, addCards, newButton, describeStep, stepVoiceText, screenSteps, motionLength };
 });
 __def('nav', function (__req) {
 'use strict';
@@ -6686,6 +6761,7 @@ async function packDemo(demo, { mode = 'dataurl', maxW = 1920, onProgress } = {}
   const files = [];
   const steps = [];
   const total = demo.steps.length;
+  const shared = new Map(); // videoId -> url, so one recording used by many steps is packed once
   for (let i = 0; i < total; i++) {
     const s = demo.steps[i];
     const out = {
@@ -6714,7 +6790,10 @@ async function packDemo(demo, { mode = 'dataurl', maxW = 1920, onProgress } = {}
       // Video can't be blurred, so a step with blurred areas never ships its movement clip.
       if (motionPlays(s)) {
         const mv = await db.getBlob(s.motion.videoId);
-        if (mv) out.motion = { video: await asUrl(mv, mode, `${s.id}-motion`, files), dur: s.motion.dur, start: s.motion.start || 0, end: s.motion.end || null };
+        if (mv) {
+          if (!shared.has(s.motion.videoId)) shared.set(s.motion.videoId, await asUrl(mv, mode, s.motion.shared ? 'recording' : `${s.id}-motion`, files));
+          out.motion = { video: shared.get(s.motion.videoId), dur: s.motion.dur, start: s.motion.start || 0, end: s.motion.end || null };
+        }
       }
     } else if (s.type === 'video') {
       Object.assign(out, { imgW: s.imgW, imgH: s.imgH, dur: s.dur, autoNext: s.autoNext !== false, tooltip: s.tooltip, next: s.next });
@@ -6915,19 +6994,35 @@ function openRecordDialog({ onDone, onSteps }) {
   const pick = (v) => {
     style = v;
     styleBox.querySelectorAll('.opt').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
-    motionRow.hidden = v === 'auto';
+    motionRow.hidden = v === 'auto' || trigger === 'click';
   };
   const opt = (v, ic, title, sub) => h('button', { class: 'opt', type: 'button', dataset: { v }, 'aria-pressed': String(v === style), onclick: () => pick(v) }, icon(ic, 20), h('strong', null, title), h('small', null, sub));
   const styleBox = h('div', { class: 'opt-grid', style: { gridTemplateColumns: '1fr 1fr', marginBottom: '12px' } },
     opt('click', 'cursor', 'Click-through demo', 'Viewers click a hotspot on each step to move on.'),
     canVideo ? opt('auto', 'film', 'Video walkthrough', 'No clicks: plays your screens and movement by itself, like a video.') : null);
+  // With the Click Helper, steps can follow your clicks instead of every screen change.
+  let trigger = 'change';
+  let triggerPref = 'click';
+  try { triggerPref = localStorage.getItem('df.trigger') || 'click'; } catch { /* ignore */ }
   const helperLine = h('div', { class: 'helper-line' }, h('span', { class: 'spin' }), 'Checking for the Click Helper…');
+  const triggerBox = h('div', { class: 'trigger-box', hidden: true });
+  const drawTrigger = () => {
+    const btn = (v, title, sub) => h('button', { type: 'button', class: 'trig', 'aria-pressed': String(trigger === v), onclick: () => { trigger = v; try { localStorage.setItem('df.trigger', v); } catch { /* ignore */ } drawTrigger(); } },
+      h('strong', null, title), h('small', null, sub));
+    motionRow.hidden = style === 'auto' || trigger === 'click'; // movement is always recorded in click mode
+    triggerBox.replaceChildren(
+      h('span', { class: 'field-label' }, 'Make a new step'),
+      h('div', { class: 'trig-grid' },
+        btn('click', 'Only when I click', 'Moving the mouse, hovering and scrolling are recorded as smooth video, never as steps.'),
+        btn('change', 'Whenever the screen changes', 'Every new screen becomes a step, even without a click.')));
+  };
   detectHelper(700).then((on) => {
     helperLine.classList.toggle('on', on);
     helperLine.replaceChildren(icon(on ? 'check' : 'puzzle', 16), on
-      ? h('span', null, h('strong', null, 'Exact clicks are on. '), 'The Click Helper will place every hotspot where you click.')
-      : h('span', null, h('strong', null, 'Want exact hotspots? '), 'Add the free Click Helper to Chrome. ',
+      ? h('span', null, h('strong', null, 'Click Helper is on. '), 'Hotspots land exactly where you click.')
+      : h('span', null, h('strong', null, 'Without the Click Helper, every screen change becomes a step, '), 'so hovering can create extra steps. Add the free helper to make steps only when you click. ',
         h('a', { href: '#/settings/helper', onclick: () => dlg.close() }, 'Set it up')));
+    if (on) { trigger = triggerPref; triggerBox.hidden = false; drawTrigger(); }
   });
   const dlg = modal({
     title: onSteps ? 'Record steps here' : 'Record a demo',
@@ -6940,6 +7035,7 @@ function openRecordDialog({ onDone, onSteps }) {
       styleBox,
       motionRow,
       helperLine,
+      triggerBox,
       h('p', { class: 'hint' }, 'Link opens a new tab? Click “Share this tab instead” at the top of it. Nothing is uploaded; everything stays on this computer.')),
     actions: [
       { label: 'Cancel', kind: 'btn-quiet' },
@@ -6947,7 +7043,7 @@ function openRecordDialog({ onDone, onSteps }) {
         motionPref = motion.checked;
         try { localStorage.setItem('trailmark.motion', motionPref ? 'on' : 'off'); } catch { /* ignore */ }
         dlg.close();
-        await beginSteps({ onDone, onSteps, motion: style === 'auto' ? true : motion.checked, auto: style === 'auto' });
+        await beginSteps({ onDone, onSteps, motion: style === 'auto' || trigger === 'click' ? true : motion.checked, auto: style === 'auto', trigger });
       } },
     ],
   });
@@ -7021,8 +7117,8 @@ function recordingPanel(stream, spec) {
   };
 }
 
-async function beginSteps({ onDone, onSteps, motion, auto }) {
-  const rec = new ScreenRecorder({ motion });
+async function beginSteps({ onDone, onSteps, motion, auto, trigger = 'change' }) {
+  const rec = new ScreenRecorder({ motion, trigger });
   try { await rec.start(); } catch (e) { startError(e); return; }
   let ended = false;
   const finish = async () => {
@@ -7057,7 +7153,7 @@ async function beginSteps({ onDone, onSteps, motion, auto }) {
     label: 'Recording',
     hint: 'Link opened a new tab? Click “Share this tab instead” at the top of that tab.',
     count: () => `${rec.count}`,
-    extra: rec.motion ? () => `${rec.clips} clip${rec.clips === 1 ? '' : 's'}` : null,
+    extra: rec.motion && trigger !== 'click' ? () => `${rec.clips} clip${rec.clips === 1 ? '' : 's'}` : null,
     buttons: [
       { text: 'Capture step', run: () => { if (rec.captureNow()) ui.update(true); } },
       { text: 'Finish', cls: 'fin', run: finish },
@@ -7208,8 +7304,11 @@ function stopMediaRecorder(r) {
 }
 
 class ScreenRecorder {
-  constructor({ onUpdate, motion = true, full = true } = {}) {
-    this.full = full;
+  // trigger: 'change' = a new step whenever the screen settles on something new;
+  //          'click'  = a new step only when you click (needs the Click Helper).
+  constructor({ onUpdate, motion = true, full = true, trigger = 'change' } = {}) {
+    this.trigger = trigger;
+    this.full = full || trigger === 'click';
     this.onUpdate = onUpdate || (() => {});
     this.motion = motion && videoRecordingSupported();
     this.steps = [];          // committed: { small, w, h, hotspot, highlight, unsure, blobPromise, motion }
@@ -7231,7 +7330,30 @@ class ScreenRecorder {
 
   _onHelper(ev) {
     if (this.stopped || this.finishing || !ev || typeof ev.t !== 'number') return;
-    this.clicks.push({ ...ev, pt: performance.now() - (Date.now() - ev.t) });
+    const c = { ...ev, pt: performance.now() - (Date.now() - ev.t) };
+    this.clicks.push(c);
+    if (this.trigger === 'click' && c.kind === 'click') this._clickStep(c);
+  }
+
+  // Frame timestamps (µs) and performance.now() (ms) run on different clocks.
+  _tsAt(pt) { return this.tsOff == null ? null : (pt + this.tsOff) * 1000; }
+
+  // Click mode: the screen as it was when you clicked becomes a step.
+  _clickStep(c) {
+    if (this.surface !== 'browser') return;
+    const s = this.track && this.track.getSettings ? this.track.getSettings() : {};
+    if (s.width && s.height && c.vw && c.vh && Math.abs(c.vw / c.vh - s.width / s.height) / (s.width / s.height) > 0.04) return; // a click in another tab
+    const last = this.steps[this.steps.length - 1];
+    if (last && last.click && c.pt - last.click.pt < 400) return; // double-click
+    const frame = this.prev || this.latest;
+    if (!frame) return;
+    const step = { small: frame.small, unsure: false, hotspot: { x: c.x, y: c.y }, highlight: null, click: c, clickTs: this._tsAt(c.pt), frameT: c.pt, leftAt: c.pt };
+    const b = c.box;
+    if (b && b.w > 0.004 && b.h > 0.004 && b.w * b.h < 0.2) step.highlight = { x: Math.max(0, b.x - 0.004), y: Math.max(0, b.y - 0.004), w: Math.min(1, b.w + 0.008), h: Math.min(1, b.h + 0.008) };
+    // Worker mode: a snapshot of the newest frame, which is still the screen before the click.
+    step.shot = this.cw ? this._shot({}) : this._shot(frame);
+    this.steps.push(step);
+    this.onUpdate(this);
   }
 
   async start() {
@@ -7353,7 +7475,7 @@ class ScreenRecorder {
     // Handle each still screen once (thumbnails keep arriving while a caret blinks).
     if (this.settledSmall && this._diff(this.prev.small, this.settledSmall).share <= ANY_CHANGE) return;
     this.settledSmall = this.prev.small;
-    this._setCandidate(this.prev);
+    if (this.trigger !== 'click') this._setCandidate(this.prev);
   }
 
   _analyse({ bmp, ts }) {
@@ -7363,15 +7485,23 @@ class ScreenRecorder {
     // Worker frames are thumbnails used only for detection; free them at once.
     if (this.cw) { bmp.close(); bmp = null; }
     const cur = { small, bmp, t: now, ts };
+    const off = ts / 1000 - now;
+    if (this.tsOff == null || off > this.tsOff) this.tsOff = off; // least-delayed frame wins
+    if (this.trigger === 'click' && !this.startStep) {
+      // The screen when recording began, in case there's movement before the first click.
+      this.startStep = { small, unsure: false, hotspot: { x: 0.5, y: 0.5 }, highlight: null, start: true, clickTs: ts, frameT: now };
+      this.startStep.shot = this.cw ? this._shot({}) : this._shot(cur);
+    }
     this._settleCheck(now);
     const vsPrev = this._diff(small, this.prev && this.prev.small);
     if (this.prev && vsPrev.share > ANY_CHANGE) {
       if (now - this.lastChangeAt > 300) this.changeStartAt = now; // a new burst of change begins
+      (this.changeTs = this.changeTs || []).push(ts);
       if (!this.moving) this._motionStart(now, ts);
       this.lastChangeAt = now;
       this.lastChangeTs = ts;
     }
-    if (this.cand) {
+    if (this.trigger === 'click') { /* steps come from clicks only */ } else if (this.cand) {
       const vsCand = this._diff(small, this.cand.small);
       if (vsCand.share > STEP_CHANGE) {
         const old = this.cand;
@@ -7497,6 +7627,14 @@ class ScreenRecorder {
   captureNow() {
     const f = this.latest;
     if (!f) return false;
+    if (this.trigger === 'click') {
+      const now = performance.now();
+      const step = { small: f.small, unsure: true, hotspot: { x: 0.5, y: 0.5 }, highlight: null, clickTs: this._tsAt(now), frameT: now, leftAt: now };
+      step.shot = this.cw ? this._shot({}) : this._shot(f);
+      this.steps.push(step);
+      this.onUpdate(this);
+      return true;
+    }
     if (this.cand && this.cand !== f) { this._commit(this.cand, null); if (this.cand !== this.prev) close(this.cand); }
     this._commit(f, null, true);
     this.cand = null;
@@ -7508,6 +7646,7 @@ class ScreenRecorder {
   // finalStep: treat the last screen as the closing step of a new demo.
   async collectSteps({ finalStep = true, auto = false } = {}) {
     if (this.stopped || this.finishing) return [];
+    if (this.trigger === 'click') return this._collectClickSteps({ finalStep, auto });
     this.finishing = true;
     const final = this.cand || this.latest;
     if (final) {
@@ -7585,11 +7724,86 @@ class ScreenRecorder {
     return demo.id;
   }
 
+  // Click mode. Step k shows the screen when you made click k; everything that
+  // happened on screen until click k+1 is its movement: one continuous recording,
+  // shared by every step, so nothing is skipped and deleting a step loses no video.
+  async _collectClickSteps({ finalStep, auto }) {
+    this.finishing = true;
+    const endPt = performance.now();
+    const final = this.latest || this.prev;
+    const last = this.steps[this.steps.length - 1];
+    if (final && (!last || this._diff(final.small, last.small).share > ANY_CHANGE * 2 || finalStep)) {
+      const st = { small: final.small, unsure: false, hotspot: { x: 0.5, y: 0.5 }, highlight: null, final: true, clickTs: this._tsAt(endPt), frameT: endPt };
+      st.shot = this.cw ? this._shot({}) : this._shot(final);
+      this.steps.push(st);
+    }
+    // Movement before the first click plays as a short video-only step.
+    const firstClick = this.steps[0];
+    if (this.startStep && firstClick && firstClick.clickTs != null) {
+      const moved = (this.changeTs || []).filter((t) => t > this.startStep.clickTs && t <= firstClick.clickTs);
+      if (moved.length > 3 && moved[moved.length - 1] - moved[0] > 400000) this.steps.unshift(this.startStep);
+    }
+    await Promise.all(this.steps.map((s) => s.shot));
+    this.fullVideo = null;
+    let first = 0;
+    if (this.encoding && !this.cw.fullLost) {
+      await sleep(250);
+      const r = await this.cw.clip(-Infinity, Infinity, 1);
+      if (r && r.blob) { this.fullVideo = { blob: r.blob, dur: r.duration }; first = r.first || 0; }
+    }
+    this._stop();
+    if (this.fullVideo) { this.fullVideo.id = uid('vid_'); await db.putBlob(this.fullVideo.id, this.fullVideo.blob); }
+    const changes = this.changeTs || [];
+    const out = [];
+    for (let i = 0; i < this.steps.length; i++) {
+      const r = this.steps[i];
+      const shot = await r.shot;
+      if (!shot) continue;
+      const s = newScreenStep({ imgW: shot.w, imgH: shot.h, action: 'click', hotspot: { x: r.hotspot.x, y: r.hotspot.y, style: r.final ? 'none' : 'beacon' }, highlight: r.highlight });
+      s.imageId = 'img_' + s.id;
+      await db.putBlob(s.imageId, shot.blob);
+      if (r.final) s.tooltip.text = 'That’s it. You’re all set.';
+      else if (r.start) {
+        s.play = 'auto'; s.hold = 0.4; s.hotspot.style = 'none'; s.tooltip.text = '';
+        const next = this.steps[i + 1];
+        const moved = changes.filter((t) => t > r.clickTs && t <= next.clickTs);
+        if (this.fullVideo && moved.length) {
+          const start = Math.max(0, (moved[0] - 150000 - first) / 1e6);
+          const end = Math.min(this.fullVideo.dur, (Math.min(next.clickTs, moved[moved.length - 1] + 350000) - first) / 1e6);
+          if (end - start >= 0.1) s.motion = { videoId: this.fullVideo.id, dur: this.fullVideo.dur, start: +start.toFixed(3), end: +end.toFixed(3), play: true, shared: true };
+        }
+      } else {
+        const c = r.click || { pt: r.frameT };
+        if (!r.click) { s.tooltip.text = 'Click here to continue.'; s.hotspotUnsure = true; }
+        s.element = { label: c.label || '', text: c.label || '', kind: c.el || 'button', tag: c.tag || '' };
+        s.pageUrl = c.url || ''; s.pageTitle = c.title || '';
+        const nextPt = this.steps[i + 1] ? (this.steps[i + 1].click ? this.steps[i + 1].click.pt : this.steps[i + 1].frameT) : endPt;
+        const typed = this.clicks.filter((x) => x.kind === 'type' && x.pt > c.pt && x.pt <= nextPt + 300).pop();
+        if (typed && c.el === 'input' && typed.value) { s.action = 'type'; s.typed = typed.value; }
+        if (r.click) { s.tooltip.text = describeStep(s); s.exactClick = true; }
+        // Movement: from the click until the screen last changed before the next step.
+        const next = this.steps[i + 1];
+        if (this.fullVideo && r.clickTs != null && next && next.clickTs != null) {
+          const from = r.clickTs - 60000;
+          const moved = changes.filter((t) => t > r.clickTs && t <= next.clickTs);
+          if (moved.length) {
+            const to = Math.min(next.clickTs, moved[moved.length - 1] + 350000);
+            const start = Math.max(0, (from - first) / 1e6), end = Math.min(this.fullVideo.dur, (to - first) / 1e6);
+            if (end - start >= 0.1) s.motion = { videoId: this.fullVideo.id, dur: this.fullVideo.dur, start: +start.toFixed(3), end: +end.toFixed(3), play: true, shared: true };
+          }
+        }
+      }
+      if (auto) s.play = 'auto';
+      out.push(s);
+    }
+    return out;
+  }
+
   // Store the continuous session video; the first screenshot is its poster.
   async saveFull(steps) {
     if (!this.fullVideo || !steps.length) return null;
-    const videoId = uid('vid_');
-    await db.putBlob(videoId, this.fullVideo.blob);
+    const videoId = this.fullVideo.id || uid('vid_');
+    if (!this.fullVideo.id) await db.putBlob(videoId, this.fullVideo.blob);
     const first = steps.find((x) => x.imageId) || {};
     return { videoId, dur: this.fullVideo.dur, posterId: first.imageId || null, w: first.imgW || 1280, h: first.imgH || 800, at: Date.now() };
   }

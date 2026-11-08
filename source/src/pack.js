@@ -18,6 +18,7 @@ export async function packDemo(demo, { mode = 'dataurl', maxW = 1920, onProgress
   const files = [];
   const steps = [];
   const total = demo.steps.length;
+  const shared = new Map(); // videoId -> url, so one recording used by many steps is packed once
   for (let i = 0; i < total; i++) {
     const s = demo.steps[i];
     const out = {
@@ -46,7 +47,10 @@ export async function packDemo(demo, { mode = 'dataurl', maxW = 1920, onProgress
       // Video can't be blurred, so a step with blurred areas never ships its movement clip.
       if (motionPlays(s)) {
         const mv = await db.getBlob(s.motion.videoId);
-        if (mv) out.motion = { video: await asUrl(mv, mode, `${s.id}-motion`, files), dur: s.motion.dur, start: s.motion.start || 0, end: s.motion.end || null };
+        if (mv) {
+          if (!shared.has(s.motion.videoId)) shared.set(s.motion.videoId, await asUrl(mv, mode, s.motion.shared ? 'recording' : `${s.id}-motion`, files));
+          out.motion = { video: shared.get(s.motion.videoId), dur: s.motion.dur, start: s.motion.start || 0, end: s.motion.end || null };
+        }
       }
     } else if (s.type === 'video') {
       Object.assign(out, { imgW: s.imgW, imgH: s.imgH, dur: s.dur, autoNext: s.autoNext !== false, tooltip: s.tooltip, next: s.next });

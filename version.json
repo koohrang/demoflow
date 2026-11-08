@@ -1,15 +1,14 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "url": "Demoflow.html",
-  "sha256": "8ddde27b186cba4d18789b17895e40072f4192953c85095106f8ab8a9ceced23",
-  "size": 675385,
+  "sha256": "012568621b260de1232ad35fee6dcddac9f1504f5cd7fff6431fb5991195b1a5",
+  "size": 690040,
   "notes": [
-    "New name and logo: Trailmark is now Demoflow.",
-    "Exact click positions with the optional Click Helper extension.",
-    "Back up and restore all your demos.",
-    "Zoom, arrows, boxes and labels, and trimming for movement clips.",
-    "Publish online with Netlify, branding, lead form, background music, subtitles and AI translation.",
-    "Updates install themselves from now on."
+    "New: make a step only when you click (with the Click Helper). Moving the mouse, hovering and scrolling now record as smooth video instead of extra steps.",
+    "Movement between clicks plays as one continuous recording, including movement before your first click.",
+    "Deleting a step hands its movement to the step before, so the video never jumps.",
+    "Trimmed clips stop exactly where you set them.",
+    "Player buttons no longer cover hotspots in the top-right corner."
   ],
   "released": "2026-11-08"
 }

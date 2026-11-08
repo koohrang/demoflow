@@ -13,15 +13,21 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
 function words(s) { return String(s || '').trim().split(/\s+/).filter(Boolean).length; }
 
-function loadVideo(blob) {
+const videoUrls = new WeakMap();
+// at: seek there before the segment starts, so a section of a long recording plays at once.
+function loadVideo(blob, at = 0) {
   return new Promise((resolve) => {
     const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto';
-    const done = () => resolve(v.readyState >= 1 ? v : null);
-    v.addEventListener('loadeddata', done, { once: true });
+    let settled = false;
+    const done = () => { if (settled) return; settled = true; resolve(v.readyState >= 1 ? v : null); };
+    v.addEventListener('loadeddata', () => {
+      if (at > 0.05) { v.addEventListener('seeked', done, { once: true }); try { v.currentTime = at; } catch { done(); } } else done();
+    }, { once: true });
     v.addEventListener('error', () => resolve(null), { once: true });
-    setTimeout(done, 5000);
-    v.src = URL.createObjectURL(blob);
+    setTimeout(done, 6000);
+    if (!videoUrls.has(blob)) videoUrls.set(blob, URL.createObjectURL(blob));
+    v.src = videoUrls.get(blob);
   });
 }
 
@@ -34,6 +40,7 @@ export async function buildTimeline(demo, { width = 1280, cursor = true, withAud
   const H = Math.round(W / aspect / 2) * 2;
   const images = new Map();
   const blurred = new Map();
+  const blobCache = new Map();
   let actx = null;
   const segs = [];
   let t = 0;
@@ -74,8 +81,9 @@ export async function buildTimeline(demo, { width = 1280, cursor = true, withAud
       prevImg = img;
       }
       if (withVideo && motionPlays(s)) {
-        const vb = await db.getBlob(s.motion.videoId);
-        const video = vb ? await loadVideo(vb) : null;
+        const vb = blobCache.get(s.motion.videoId) || await db.getBlob(s.motion.videoId);
+        if (vb) blobCache.set(s.motion.videoId, vb);
+        const video = vb ? await loadVideo(vb, s.motion.start || 0) : null;
         if (video) {
           const endAt = s.motion.end != null && +s.motion.end > (s.motion.start || 0) ? +s.motion.end : (s.motion.dur || 1);
           const dur = Math.max(0.2, endAt - (s.motion.start || 0));

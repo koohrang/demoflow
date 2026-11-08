@@ -522,9 +522,12 @@
   Player.prototype._preloadMotion = function (step) {
     var m = step.motion;
     if (!m || !m.video || m.play === false) { this._pre = null; return; }
-    if (this._pre && this._pre.getAttribute('src') === m.video) return;
-    this._pre = this._motionVideo(m.video);
-    try { this._pre.load(); } catch (e) { /* ignore */ }
+    var t0 = Math.max(0, +m.start || 0);
+    if (this._pre && this._pre.getAttribute('src') === m.video && this._preAt === t0) return;
+    var v = this._pre = this._motionVideo(m.video);
+    this._preAt = t0;
+    try { v.load(); } catch (e) { /* ignore */ }
+    if (t0 > 0) v.addEventListener('loadedmetadata', function () { if (Math.abs(v.currentTime - t0) > 0.04) { try { v.currentTime = t0; } catch (e) { /* ignore */ } } }, { once: true });
   };
 
   Player.prototype._playMotion = function (m, done) {
@@ -535,13 +538,13 @@
     this._dropMotion();
     this._setZoom(1, 0, 0, 350);
     var t0 = Math.max(0, +m.start || 0), t1 = m.end != null && +m.end > t0 ? +m.end : 0;
-    var v = (this._pre && this._pre.getAttribute('src') === m.video) ? this._pre : this._motionVideo(m.video);
+    var v = (this._pre && this._pre.getAttribute('src') === m.video && this._preAt === t0) ? this._pre : this._motionVideo(m.video);
     this._pre = null;
     var skip = el('button', 'tmp-skip', 'Skip');
     skip.type = 'button';
     var fin = function () {
       if (finished) return;
-      finished = true; clearTimeout(timer);
+      finished = true; clearTimeout(timer); if (poll) clearInterval(poll);
       if (self._token !== token) return;
       try { v.pause(); } catch (e) { /* ignore */ }
       skip.remove();
@@ -557,19 +560,29 @@
     v.addEventListener('error', fin);
     v.addEventListener('click', fin);
     skip.addEventListener('click', function (e) { e.stopPropagation(); fin(); });
+    // Stop at the trim point. A recording has no new frames while the screen is
+    // still, so check the clock rather than waiting for the next frame.
+    var poll = null;
     if (t1) {
-      var watch = function () {
-        if (finished) return;
-        if (v.currentTime >= t1 - 0.02) { fin(); return; }
-        if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(watch); else setTimeout(watch, 30);
-      };
-      if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(watch); else v.addEventListener('timeupdate', watch);
+      poll = setInterval(function () {
+        if (finished || !v.isConnected && self._token !== token) { clearInterval(poll); return; }
+        if (v.currentTime >= t1 - 0.03) { clearInterval(poll); fin(); }
+      }, 20);
     }
-    try { v.currentTime = t0; } catch (e) { /* not seekable yet */ }
-    if (t0 > 0) v.addEventListener('loadedmetadata', function () { if (v.currentTime < t0) try { v.currentTime = t0; } catch (e) { /* ignore */ } }, { once: true });
     this.stage.append(v, skip);
     this._motionEl = v;
-    if (!this.paused) { var p = v.play(); if (p && p.catch) p.catch(function () { if (!self.paused) fin(); }); }
+    // Play only once the video sits at its start point, so no earlier frame flashes.
+    var go = function () {
+      if (finished || self._token !== token || self.paused) return;
+      var p = v.play(); if (p && p.catch) p.catch(function () { if (!self.paused) fin(); });
+    };
+    var ready = v.readyState >= 1 && !v.seeking && Math.abs(v.currentTime - t0) <= 0.04;
+    if (ready || t0 <= 0) { if (t0 <= 0 && v.currentTime > 0.04) { try { v.currentTime = 0; } catch (e) { /* ignore */ } } go(); }
+    else {
+      v.addEventListener('seeked', function once() { if (Math.abs(v.currentTime - t0) <= 0.05) { v.removeEventListener('seeked', once); go(); } });
+      var seek = function () { if (Math.abs(v.currentTime - t0) > 0.04 || !v.seeking) { try { v.currentTime = t0; } catch (e) { /* ignore */ } } };
+      if (v.readyState >= 1) seek(); else v.addEventListener('loadedmetadata', seek, { once: true });
+    }
     timer = setTimeout(function check() {
       if (self.paused) { timer = setTimeout(check, 1000); return; }
       fin();
@@ -685,6 +698,11 @@
     if (step.play === 'auto') { this._renderAutoScreen(step, i); return; }
     var hs = step.hotspot || { x: 0.5, y: 0.5, style: 'beacon' };
     var style = hs.style || 'beacon';
+    // Keep the player's buttons off a hotspot in the top-right corner.
+    var hx = hs.x, hy = hs.y;
+    if (step.highlight && (style === 'area' || style === 'spotlight')) { hx = step.highlight.x + step.highlight.w; hy = step.highlight.y; }
+    var mz = this._map(hx, hy);
+    this.root.classList.toggle('tmp-ctl-low', style !== 'none' && mz.x * this._w > this._w - 190 && mz.y * this._h < 70);
     var act = function (e) { if (e) e.stopPropagation(); self._advance(step); };
     var label = (step.tooltip && step.tooltip.text) ? step.tooltip.text.replace(/\*\*/g, '') : 'Continue';
     if ((style === 'spotlight' || style === 'area') && step.highlight) {

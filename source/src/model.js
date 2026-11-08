@@ -193,3 +193,12 @@ export function stepVoiceText(step) {
 }
 
 export function screenSteps(demo) { return demo.steps.filter((s) => s.type === 'screen'); }
+
+// Seconds of movement a step actually plays (after trimming).
+export function motionLength(step) {
+  const m = step && step.motion;
+  if (!m) return 0;
+  const start = +m.start || 0;
+  const end = m.end != null && +m.end > start ? +m.end : (+m.dur || 0);
+  return Math.max(0, end - start);
+}

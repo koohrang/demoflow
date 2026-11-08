@@ -97,8 +97,11 @@ function stopMediaRecorder(r) {
 }
 
 export class ScreenRecorder {
-  constructor({ onUpdate, motion = true, full = true } = {}) {
-    this.full = full;
+  // trigger: 'change' = a new step whenever the screen settles on something new;
+  //          'click'  = a new step only when you click (needs the Click Helper).
+  constructor({ onUpdate, motion = true, full = true, trigger = 'change' } = {}) {
+    this.trigger = trigger;
+    this.full = full || trigger === 'click';
     this.onUpdate = onUpdate || (() => {});
     this.motion = motion && videoRecordingSupported();
     this.steps = [];          // committed: { small, w, h, hotspot, highlight, unsure, blobPromise, motion }
@@ -120,7 +123,30 @@ export class ScreenRecorder {
 
   _onHelper(ev) {
     if (this.stopped || this.finishing || !ev || typeof ev.t !== 'number') return;
-    this.clicks.push({ ...ev, pt: performance.now() - (Date.now() - ev.t) });
+    const c = { ...ev, pt: performance.now() - (Date.now() - ev.t) };
+    this.clicks.push(c);
+    if (this.trigger === 'click' && c.kind === 'click') this._clickStep(c);
+  }
+
+  // Frame timestamps (µs) and performance.now() (ms) run on different clocks.
+  _tsAt(pt) { return this.tsOff == null ? null : (pt + this.tsOff) * 1000; }
+
+  // Click mode: the screen as it was when you clicked becomes a step.
+  _clickStep(c) {
+    if (this.surface !== 'browser') return;
+    const s = this.track && this.track.getSettings ? this.track.getSettings() : {};
+    if (s.width && s.height && c.vw && c.vh && Math.abs(c.vw / c.vh - s.width / s.height) / (s.width / s.height) > 0.04) return; // a click in another tab
+    const last = this.steps[this.steps.length - 1];
+    if (last && last.click && c.pt - last.click.pt < 400) return; // double-click
+    const frame = this.prev || this.latest;
+    if (!frame) return;
+    const step = { small: frame.small, unsure: false, hotspot: { x: c.x, y: c.y }, highlight: null, click: c, clickTs: this._tsAt(c.pt), frameT: c.pt, leftAt: c.pt };
+    const b = c.box;
+    if (b && b.w > 0.004 && b.h > 0.004 && b.w * b.h < 0.2) step.highlight = { x: Math.max(0, b.x - 0.004), y: Math.max(0, b.y - 0.004), w: Math.min(1, b.w + 0.008), h: Math.min(1, b.h + 0.008) };
+    // Worker mode: a snapshot of the newest frame, which is still the screen before the click.
+    step.shot = this.cw ? this._shot({}) : this._shot(frame);
+    this.steps.push(step);
+    this.onUpdate(this);
   }
 
   async start() {
@@ -242,7 +268,7 @@ export class ScreenRecorder {
     // Handle each still screen once (thumbnails keep arriving while a caret blinks).
     if (this.settledSmall && this._diff(this.prev.small, this.settledSmall).share <= ANY_CHANGE) return;
     this.settledSmall = this.prev.small;
-    this._setCandidate(this.prev);
+    if (this.trigger !== 'click') this._setCandidate(this.prev);
   }
 
   _analyse({ bmp, ts }) {
@@ -252,15 +278,23 @@ export class ScreenRecorder {
     // Worker frames are thumbnails used only for detection; free them at once.
     if (this.cw) { bmp.close(); bmp = null; }
     const cur = { small, bmp, t: now, ts };
+    const off = ts / 1000 - now;
+    if (this.tsOff == null || off > this.tsOff) this.tsOff = off; // least-delayed frame wins
+    if (this.trigger === 'click' && !this.startStep) {
+      // The screen when recording began, in case there's movement before the first click.
+      this.startStep = { small, unsure: false, hotspot: { x: 0.5, y: 0.5 }, highlight: null, start: true, clickTs: ts, frameT: now };
+      this.startStep.shot = this.cw ? this._shot({}) : this._shot(cur);
+    }
     this._settleCheck(now);
     const vsPrev = this._diff(small, this.prev && this.prev.small);
     if (this.prev && vsPrev.share > ANY_CHANGE) {
       if (now - this.lastChangeAt > 300) this.changeStartAt = now; // a new burst of change begins
+      (this.changeTs = this.changeTs || []).push(ts);
       if (!this.moving) this._motionStart(now, ts);
       this.lastChangeAt = now;
       this.lastChangeTs = ts;
     }
-    if (this.cand) {
+    if (this.trigger === 'click') { /* steps come from clicks only */ } else if (this.cand) {
       const vsCand = this._diff(small, this.cand.small);
       if (vsCand.share > STEP_CHANGE) {
         const old = this.cand;
@@ -386,6 +420,14 @@ export class ScreenRecorder {
   captureNow() {
     const f = this.latest;
     if (!f) return false;
+    if (this.trigger === 'click') {
+      const now = performance.now();
+      const step = { small: f.small, unsure: true, hotspot: { x: 0.5, y: 0.5 }, highlight: null, clickTs: this._tsAt(now), frameT: now, leftAt: now };
+      step.shot = this.cw ? this._shot({}) : this._shot(f);
+      this.steps.push(step);
+      this.onUpdate(this);
+      return true;
+    }
     if (this.cand && this.cand !== f) { this._commit(this.cand, null); if (this.cand !== this.prev) close(this.cand); }
     this._commit(f, null, true);
     this.cand = null;
@@ -397,6 +439,7 @@ export class ScreenRecorder {
   // finalStep: treat the last screen as the closing step of a new demo.
   async collectSteps({ finalStep = true, auto = false } = {}) {
     if (this.stopped || this.finishing) return [];
+    if (this.trigger === 'click') return this._collectClickSteps({ finalStep, auto });
     this.finishing = true;
     const final = this.cand || this.latest;
     if (final) {
@@ -474,11 +517,86 @@ export class ScreenRecorder {
     return demo.id;
   }
 
+  // Click mode. Step k shows the screen when you made click k; everything that
+  // happened on screen until click k+1 is its movement: one continuous recording,
+  // shared by every step, so nothing is skipped and deleting a step loses no video.
+  async _collectClickSteps({ finalStep, auto }) {
+    this.finishing = true;
+    const endPt = performance.now();
+    const final = this.latest || this.prev;
+    const last = this.steps[this.steps.length - 1];
+    if (final && (!last || this._diff(final.small, last.small).share > ANY_CHANGE * 2 || finalStep)) {
+      const st = { small: final.small, unsure: false, hotspot: { x: 0.5, y: 0.5 }, highlight: null, final: true, clickTs: this._tsAt(endPt), frameT: endPt };
+      st.shot = this.cw ? this._shot({}) : this._shot(final);
+      this.steps.push(st);
+    }
+    // Movement before the first click plays as a short video-only step.
+    const firstClick = this.steps[0];
+    if (this.startStep && firstClick && firstClick.clickTs != null) {
+      const moved = (this.changeTs || []).filter((t) => t > this.startStep.clickTs && t <= firstClick.clickTs);
+      if (moved.length > 3 && moved[moved.length - 1] - moved[0] > 400000) this.steps.unshift(this.startStep);
+    }
+    await Promise.all(this.steps.map((s) => s.shot));
+    this.fullVideo = null;
+    let first = 0;
+    if (this.encoding && !this.cw.fullLost) {
+      await sleep(250);
+      const r = await this.cw.clip(-Infinity, Infinity, 1);
+      if (r && r.blob) { this.fullVideo = { blob: r.blob, dur: r.duration }; first = r.first || 0; }
+    }
+    this._stop();
+    if (this.fullVideo) { this.fullVideo.id = uid('vid_'); await db.putBlob(this.fullVideo.id, this.fullVideo.blob); }
+    const changes = this.changeTs || [];
+    const out = [];
+    for (let i = 0; i < this.steps.length; i++) {
+      const r = this.steps[i];
+      const shot = await r.shot;
+      if (!shot) continue;
+      const s = newScreenStep({ imgW: shot.w, imgH: shot.h, action: 'click', hotspot: { x: r.hotspot.x, y: r.hotspot.y, style: r.final ? 'none' : 'beacon' }, highlight: r.highlight });
+      s.imageId = 'img_' + s.id;
+      await db.putBlob(s.imageId, shot.blob);
+      if (r.final) s.tooltip.text = 'That’s it. You’re all set.';
+      else if (r.start) {
+        s.play = 'auto'; s.hold = 0.4; s.hotspot.style = 'none'; s.tooltip.text = '';
+        const next = this.steps[i + 1];
+        const moved = changes.filter((t) => t > r.clickTs && t <= next.clickTs);
+        if (this.fullVideo && moved.length) {
+          const start = Math.max(0, (moved[0] - 150000 - first) / 1e6);
+          const end = Math.min(this.fullVideo.dur, (Math.min(next.clickTs, moved[moved.length - 1] + 350000) - first) / 1e6);
+          if (end - start >= 0.1) s.motion = { videoId: this.fullVideo.id, dur: this.fullVideo.dur, start: +start.toFixed(3), end: +end.toFixed(3), play: true, shared: true };
+        }
+      } else {
+        const c = r.click || { pt: r.frameT };
+        if (!r.click) { s.tooltip.text = 'Click here to continue.'; s.hotspotUnsure = true; }
+        s.element = { label: c.label || '', text: c.label || '', kind: c.el || 'button', tag: c.tag || '' };
+        s.pageUrl = c.url || ''; s.pageTitle = c.title || '';
+        const nextPt = this.steps[i + 1] ? (this.steps[i + 1].click ? this.steps[i + 1].click.pt : this.steps[i + 1].frameT) : endPt;
+        const typed = this.clicks.filter((x) => x.kind === 'type' && x.pt > c.pt && x.pt <= nextPt + 300).pop();
+        if (typed && c.el === 'input' && typed.value) { s.action = 'type'; s.typed = typed.value; }
+        if (r.click) { s.tooltip.text = describeStep(s); s.exactClick = true; }
+        // Movement: from the click until the screen last changed before the next step.
+        const next = this.steps[i + 1];
+        if (this.fullVideo && r.clickTs != null && next && next.clickTs != null) {
+          const from = r.clickTs - 60000;
+          const moved = changes.filter((t) => t > r.clickTs && t <= next.clickTs);
+          if (moved.length) {
+            const to = Math.min(next.clickTs, moved[moved.length - 1] + 350000);
+            const start = Math.max(0, (from - first) / 1e6), end = Math.min(this.fullVideo.dur, (to - first) / 1e6);
+            if (end - start >= 0.1) s.motion = { videoId: this.fullVideo.id, dur: this.fullVideo.dur, start: +start.toFixed(3), end: +end.toFixed(3), play: true, shared: true };
+          }
+        }
+      }
+      if (auto) s.play = 'auto';
+      out.push(s);
+    }
+    return out;
+  }
+
   // Store the continuous session video; the first screenshot is its poster.
   async saveFull(steps) {
     if (!this.fullVideo || !steps.length) return null;
-    const videoId = uid('vid_');
-    await db.putBlob(videoId, this.fullVideo.blob);
+    const videoId = this.fullVideo.id || uid('vid_');
+    if (!this.fullVideo.id) await db.putBlob(videoId, this.fullVideo.blob);
     const first = steps.find((x) => x.imageId) || {};
     return { videoId, dur: this.fullVideo.dur, posterId: first.imageId || null, w: first.imgW || 1280, h: first.imgH || 800, at: Date.now() };
   }

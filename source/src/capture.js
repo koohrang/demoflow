@@ -170,7 +170,7 @@ function captureWorkerMain() {
         const built = buildWebM({ codec: codecName, width: cfg.width, height: cfg.height, frames });
         if (built) { blob = built.blob; duration = built.duration; }
       }
-      self.postMessage({ type: 'clip', id: m.id, blob, duration, frames: frames.length });
+      self.postMessage({ type: 'clip', id: m.id, blob, duration, frames: frames.length, first: frames.length ? frames[0].ts : 0 });
     } else if (m.type === 'stop') {
       stopped = true;
       try { if (reader) reader.cancel(); } catch (err) { /* ignore */ }

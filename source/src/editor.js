@@ -1,5 +1,5 @@
 import { db, uid, collectGarbage } from './db.js';
-import { newScreenStep, newChapterStep, newVideoStep, newButton, stepVoiceText, DEFAULT_THEME, addCards, newOpeningCard, newClosingCard, THEMES, FONTS, ANNO_COLORS, newDemo } from './model.js';
+import { newScreenStep, newChapterStep, newVideoStep, newButton, stepVoiceText, DEFAULT_THEME, addCards, newOpeningCard, newClosingCard, THEMES, FONTS, ANNO_COLORS, newDemo, motionLength } from './model.js';
 import { h, icon, toast, menu, modal, confirmDialog, debounce, timeAgo, downloadBlob, slug } from './ui.js';
 import { blobUrl, loadSettings } from './store.js';
 import { fileToStepImage, shrinkImage } from './media.js';
@@ -132,7 +132,7 @@ export async function renderEditor(root, demoId) {
       }
       const branches = (s.buttons || []).some((b) => b.action && b.action.type === 'step') || (s.next && s.next.type === 'step');
       const cap = s.type === 'chapter' ? (s.text || 'Section card')
-        : s.play === 'auto' ? ((s.caption && s.tooltip.text) ? s.tooltip.text.replace(/\*\*/g, '') : (motionPlays(s) ? `Plays ${secs(s.motion.dur)} of movement` : 'Shows, then moves on'))
+        : s.play === 'auto' ? ((s.caption && s.tooltip.text) ? s.tooltip.text.replace(/\*\*/g, '') : (motionPlays(s) ? `Plays ${secs(motionLength(s))} of movement` : 'Shows, then moves on'))
           : ((s.tooltip.text || '').replace(/\*\*/g, '') || (s.type === 'video' ? 'Video clip' : 'No tooltip text'));
       const li = h('li', {
         class: 'rail-item', 'aria-current': i === sel ? 'true' : 'false', draggable: 'true', tabindex: '0',
@@ -211,6 +211,12 @@ export async function renderEditor(root, demoId) {
     if (demo.steps.length === 1) { toast('A demo needs at least one step.'); return; }
     const s = demo.steps[i];
     mutate(() => {
+      // Sections of one continuous recording: the step before takes over this
+      // step's movement, so the video stays smooth instead of jumping.
+      const prev = demo.steps.slice(0, i).reverse().find((x) => x.type === 'screen');
+      if (prev && prev.motion && s.motion && prev.motion.shared && s.motion.shared && prev.motion.videoId === s.motion.videoId && s.motion.end != null) {
+        prev.motion.end = s.motion.end;
+      }
       demo.steps.splice(i, 1);
       // Re-point anything that jumped to the deleted step.
       for (const x of demo.steps) {
@@ -371,7 +377,7 @@ export async function renderEditor(root, demoId) {
 
     if (s.play === 'auto') {
       const playable = motionPlays(s);
-      canvasEl.append(h('div', { class: 'auto-chip' }, playable ? `Video only · ${secsShort(s.motion.dur)} of movement` : 'Video only'));
+      canvasEl.append(h('div', { class: 'auto-chip' }, playable ? `Video only · ${secsShort(motionLength(s))} of movement` : 'Video only'));
       if (s.caption && s.tooltip.text) {
         const cap = h('div', { class: 'tmp-tip tmp-cap tmp-cap-only' }, h('p', { class: 'tmp-text', html: TP().rich(s.tooltip.text) }));
         canvasEl.append(cap);
@@ -854,19 +860,25 @@ export async function renderEditor(root, demoId) {
     const blocked = s.blurs && s.blurs.length;
     const vid = h('video', { class: 'motion-prev', muted: true, playsinline: true, controls: true, preload: 'metadata' });
     vid.muted = true;
-    blobUrl(m.videoId).then((u) => { if (u) vid.src = u; });
+    blobUrl(m.videoId).then((u) => { if (!u) return; vid.src = u; if (m.start > 0) vid.addEventListener('loadedmetadata', () => { try { vid.currentTime = m.start; } catch { /* ignore */ } }, { once: true }); });
     const full = +m.dur || 0;
     const t0 = +m.start || 0, t1 = m.end != null ? +m.end : full;
+    // A section of the full recording: let the sliders reach a little either side.
+    const lo = m.shared ? Math.max(0, Math.floor((m.origStart != null ? m.origStart : t0) - 3)) : 0;
+    const hi = m.shared ? Math.min(full, Math.ceil((m.origEnd != null ? m.origEnd : t1) + 3)) : full;
+    if (m.shared && m.origStart == null) { m.origStart = t0; m.origEnd = t1; }
     const len = Math.max(0, t1 - t0);
-    const summary = blocked ? 'Left out' : m.play === false ? 'Off' : secsShort(len) + (t0 > 0.05 || t1 < full - 0.05 ? ' (trimmed)' : '');
+    const trimmed = m.shared ? (m.origStart != null && (Math.abs(t0 - m.origStart) > 0.05 || Math.abs(t1 - m.origEnd) > 0.05)) : (t0 > 0.05 || t1 < full - 0.05);
+    const summary = blocked ? 'Left out' : m.play === false ? 'Off' : secsShort(len) + (trimmed ? ' (trimmed)' : '');
     const outS = h('output', null, secsShort(t0)), outE = h('output', null, secsShort(t1));
     const seek = (t) => { try { vid.currentTime = t; } catch { /* not loaded */ } };
     const trim = full > 0.3 ? h('div', { class: 'trim' },
-      field(h('span', null, 'Start at ', outS), h('input', { type: 'range', class: 'range', min: 0, max: full, step: 0.05, value: t0, 'aria-label': 'Clip start',
+      field(h('span', null, 'Start at ', outS), h('input', { type: 'range', class: 'range', min: lo, max: hi, step: 0.05, value: t0, 'aria-label': 'Clip start',
         oninput: (e) => { let v = +e.target.value; const end = m.end != null ? +m.end : full; if (v > end - 0.2) { v = Math.max(0, end - 0.2); e.target.value = v; } outS.textContent = secsShort(v); seek(v); mutate(() => { m.start = v; }, { coalesce: 'ts-' + s.id, render: 'rail' }); } })),
-      field(h('span', null, 'End at ', outE), h('input', { type: 'range', class: 'range', min: 0, max: full, step: 0.05, value: t1, 'aria-label': 'Clip end',
-        oninput: (e) => { let v = +e.target.value; const st = +m.start || 0; if (v < st + 0.2) { v = Math.min(full, st + 0.2); e.target.value = v; } outE.textContent = secsShort(v); seek(v); mutate(() => { m.end = v >= full - 0.02 ? null : v; }, { coalesce: 'te-' + s.id, render: 'rail' }); } })),
-      (t0 > 0.05 || t1 < full - 0.05) ? h('button', { class: 'link-btn', type: 'button', onclick: () => mutate(() => { m.start = 0; m.end = null; }) }, 'Undo trim') : null) : null;
+      field(h('span', null, 'End at ', outE), h('input', { type: 'range', class: 'range', min: lo, max: hi, step: 0.05, value: t1, 'aria-label': 'Clip end',
+        oninput: (e) => { let v = +e.target.value; const st = +m.start || 0; if (v < st + 0.2) { v = Math.min(full, st + 0.2); e.target.value = v; } outE.textContent = secsShort(v); seek(v); mutate(() => { m.end = !m.shared && v >= full - 0.02 ? null : v; }, { coalesce: 'te-' + s.id, render: 'rail' }); } })),
+      m.shared ? ((Math.abs(t0 - m.origStart) > 0.05 || Math.abs(t1 - m.origEnd) > 0.05) ? h('button', { class: 'link-btn', type: 'button', onclick: () => mutate(() => { m.start = m.origStart; m.end = m.origEnd; }) }, 'Undo trim') : null)
+        : (t0 > 0.05 || t1 < full - 0.05) ? h('button', { class: 'link-btn', type: 'button', onclick: () => mutate(() => { m.start = 0; m.end = null; }) }, 'Undo trim') : null) : null;
     return group('move', 'Movement video', summary, false,
       vid, trim,
       blocked ? help('Video can’t be blurred, so this clip is left out because the step has blurred areas.')
@@ -972,7 +984,7 @@ export async function renderEditor(root, demoId) {
           field(h('span', null, 'Show the screenshot for ', holdOut),
             h('input', { type: 'range', min: 0, max: 5, step: 0.1, value: s.hold != null ? s.hold : 0.8, class: 'range', 'aria-label': 'Seconds before the movement plays',
               oninput: (e) => { holdOut.textContent = `${(+e.target.value).toFixed(1)} s`; mutate(() => { s.hold = +e.target.value; }, { coalesce: 'hold-' + s.id, render: 'rail' }); } })),
-          help(playable ? `Then its ${secsShort(s.motion.dur)} movement video plays.` : 'No movement video here, so it shows for at least 2.5 s.')),
+          help(playable ? `Then its ${secsShort(motionLength(s))} movement video plays.` : 'No movement video here, so it shows for at least 2.5 s.')),
         group('cap', 'Caption', s.caption ? 'On' : 'Off', false,
           h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!s.caption, onchange: (e) => mutate(() => { s.caption = e.target.checked; }) }), h('span', null, 'Show a caption')),
           s.caption ? h('textarea', { id: 'tip-text', class: 'textarea', rows: 2, 'aria-label': 'Caption text', placeholder: 'Shown at the bottom', oninput: (e) => mutate(() => { s.tooltip.text = e.target.value; }, { coalesce: 'tip-' + s.id, render: 'canvas' }) }, s.tooltip.text || '') : null),

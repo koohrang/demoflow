@@ -136,3 +136,4 @@
 .tmp-gate-err { color: #C42B32; font-size: 13px; min-height: 0; }
 .tmp-gate-err:empty { display: none; }
 .tmp-gate-note { font-size: 11.5px; color: color-mix(in srgb, var(--tmp-tip-ink) 60%, transparent); text-align: center; }
+.tmp-root.tmp-ctl-low .tmp-controls { top: auto; bottom: 14px; }
