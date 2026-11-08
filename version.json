@@ -1,14 +1,13 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "url": "Demoflow.html",
-  "sha256": "012568621b260de1232ad35fee6dcddac9f1504f5cd7fff6431fb5991195b1a5",
-  "size": 690040,
+  "sha256": "d493dc03ac1384abca2d50a2ab08c9a1b84f3693c8cbb1bb0450ce2b46969b1f",
+  "size": 693117,
   "notes": [
-    "New: make a step only when you click (with the Click Helper). Moving the mouse, hovering and scrolling now record as smooth video instead of extra steps.",
-    "Movement between clicks plays as one continuous recording, including movement before your first click.",
-    "Deleting a step hands its movement to the step before, so the video never jumps.",
-    "Trimmed clips stop exactly where you set them.",
-    "Player buttons no longer cover hotspots in the top-right corner."
+    "Recording now only shares a Chrome tab, never your whole screen, so Demoflow\u2019s own controls are never in the video.",
+    "No more steps you didn\u2019t make: without the Click Helper, steps come only from \u201cCapture step\u201d; with it, only from your clicks.",
+    "The box in the middle is gone once the floating controls open, and it no longer shows a live preview.",
+    "Smoother capture on high-resolution (Retina) screens."
   ],
   "released": "2026-11-08"
 }

@@ -72,56 +72,63 @@ export function openRecordDialog({ onDone, onSteps }) {
   const pick = (v) => {
     style = v;
     styleBox.querySelectorAll('.opt').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
-    motionRow.hidden = v === 'auto' || trigger === 'click';
+    motionRow.hidden = v === 'auto' || trigger !== 'change';
   };
   const opt = (v, ic, title, sub) => h('button', { class: 'opt', type: 'button', dataset: { v }, 'aria-pressed': String(v === style), onclick: () => pick(v) }, icon(ic, 20), h('strong', null, title), h('small', null, sub));
   const styleBox = h('div', { class: 'opt-grid', style: { gridTemplateColumns: '1fr 1fr', marginBottom: '12px' } },
     opt('click', 'cursor', 'Click-through demo', 'Viewers click a hotspot on each step to move on.'),
     canVideo ? opt('auto', 'film', 'Video walkthrough', 'No clicks: plays your screens and movement by itself, like a video.') : null);
   // With the Click Helper, steps can follow your clicks instead of every screen change.
-  let trigger = 'change';
-  let triggerPref = 'click';
-  try { triggerPref = localStorage.getItem('df.trigger') || 'click'; } catch { /* ignore */ }
+  let trigger = 'manual';
+  let triggerPref = '';
+  try { triggerPref = localStorage.getItem('df.trigger') || ''; } catch { /* ignore */ }
+  let hasHelper = false;
   const helperLine = h('div', { class: 'helper-line' }, h('span', { class: 'spin' }), 'Checking for the Click Helper…');
   const triggerBox = h('div', { class: 'trigger-box', hidden: true });
   const drawTrigger = () => {
     const btn = (v, title, sub) => h('button', { type: 'button', class: 'trig', 'aria-pressed': String(trigger === v), onclick: () => { trigger = v; try { localStorage.setItem('df.trigger', v); } catch { /* ignore */ } drawTrigger(); } },
       h('strong', null, title), h('small', null, sub));
-    motionRow.hidden = style === 'auto' || trigger === 'click'; // movement is always recorded in click mode
+    motionRow.hidden = style === 'auto' || trigger !== 'change'; // movement is always recorded unless steps follow screen changes
     triggerBox.replaceChildren(
       h('span', { class: 'field-label' }, 'Make a new step'),
       h('div', { class: 'trig-grid' },
-        btn('click', 'Only when I click', 'Moving the mouse, hovering and scrolling are recorded as smooth video, never as steps.'),
-        btn('change', 'Whenever the screen changes', 'Every new screen becomes a step, even without a click.')));
+        hasHelper
+          ? btn('click', 'When I click', 'Each click becomes a step. Moving, hovering and scrolling are smooth video in between.')
+          : btn('manual', 'When I press Capture step', 'Press it just before each click. Everything else is smooth video in between.'),
+        btn('change', 'Whenever the screen changes', 'Every new screen becomes a step, even without a click. Hovering can add extra steps.')));
   };
   detectHelper(700).then((on) => {
     helperLine.classList.toggle('on', on);
     helperLine.replaceChildren(icon(on ? 'check' : 'puzzle', 16), on
-      ? h('span', null, h('strong', null, 'Click Helper is on. '), 'Hotspots land exactly where you click.')
-      : h('span', null, h('strong', null, 'Without the Click Helper, every screen change becomes a step, '), 'so hovering can create extra steps. Add the free helper to make steps only when you click. ',
+      ? h('span', null, h('strong', null, 'Click Helper is on. '), 'Steps follow your clicks, and hotspots land exactly where you click.')
+      : h('span', null, h('strong', null, 'Click Helper not found. '), 'Demoflow can’t see clicks in another tab without it. Add it to make a step on every click automatically. ',
         h('a', { href: '#/settings/helper', onclick: () => dlg.close() }, 'Set it up')));
-    if (on) { trigger = triggerPref; triggerBox.hidden = false; drawTrigger(); }
+    hasHelper = on;
+    trigger = on ? (triggerPref === 'change' ? 'change' : 'click') : (triggerPref === 'change' ? 'change' : 'manual');
+    triggerBox.hidden = false; drawTrigger();
   });
   const dlg = modal({
     title: onSteps ? 'Record steps here' : 'Record a demo',
     body: h('div', null,
       h('ol', { class: 'trail', style: { marginTop: '6px' } },
         h('li', null, h('span', { class: 'n' }, '1'), h('div', null, h('strong', null, 'Open your app in another tab'))),
-        h('li', null, h('span', { class: 'n' }, '2'), h('div', null, h('strong', null, 'Press Start and pick that tab'))),
-        h('li', null, h('span', { class: 'n' }, '3'), h('div', null, h('strong', null, 'Use your app at a relaxed pace'), h('span', { class: 'd' }, 'Every screen becomes a step, and the whole session is saved as video too.')))),
+        h('li', null, h('span', { class: 'n' }, '2'), h('div', null, h('strong', null, 'Press Start, choose “Chrome Tab” and pick your app'), h('span', { class: 'd' }, 'Only that tab is recorded, never Demoflow’s controls or the rest of your screen.'))),
+        h('li', null, h('span', { class: 'n' }, '3'), h('div', null, h('strong', null, 'Use your app at a relaxed pace'), h('span', { class: 'd' }, 'Steps are made the way you choose below. Everything in between is saved as smooth video.')))),
       h('span', { class: 'field-label', style: { display: 'block', margin: '4px 0 8px' } }, 'How should it play?'),
       styleBox,
       motionRow,
       helperLine,
       triggerBox,
       h('p', { class: 'hint' }, 'Link opens a new tab? Click “Share this tab instead” at the top of it. Nothing is uploaded; everything stays on this computer.')),
+
     actions: [
       { label: 'Cancel', kind: 'btn-quiet' },
       { label: 'Start', kind: 'btn-blaze', close: false, run: async () => {
         motionPref = motion.checked;
+        if (trigger === 'manual' || trigger === 'click') { try { localStorage.setItem('df.trigger', trigger); } catch { /* ignore */ } }
         try { localStorage.setItem('trailmark.motion', motionPref ? 'on' : 'off'); } catch { /* ignore */ }
         dlg.close();
-        await beginSteps({ onDone, onSteps, motion: style === 'auto' || trigger === 'click' ? true : motion.checked, auto: style === 'auto', trigger });
+        await beginSteps({ onDone, onSteps, motion: style === 'auto' || trigger !== 'change' ? true : motion.checked, auto: style === 'auto', trigger });
       } },
     ],
   });
@@ -145,7 +152,19 @@ export function openClipDialog({ onStep }) {
   });
 }
 
-function startError(e) {
+function startError(e, retry) {
+  if (e && e.name === 'NotTabError') {
+    modal({
+      title: 'Pick a Chrome tab',
+      body: h('div', null,
+        h('p', { class: 'modal-text' }, e.surface === 'monitor'
+          ? 'You picked your whole screen. That records everything, including Demoflow’s own controls, and makes the video less smooth.'
+          : 'You picked a window. That records Demoflow’s own controls too, and Demoflow can’t follow your clicks.'),
+        h('p', { class: 'modal-text' }, 'In Chrome’s sharing window, open the “Chrome Tab” section, pick the tab with your app, and press Share.')),
+      actions: [{ label: 'Cancel', kind: 'btn-quiet' }, retry ? { label: 'Try again', kind: 'btn-blaze', run: retry } : null].filter(Boolean),
+    });
+    return;
+  }
   if (e && e.name === 'NotAllowedError') toast('Screen sharing was cancelled, so recording didn’t start.');
   else toast(`Recording couldn’t start: ${e && e.message || e}`, { kind: 'error', timeout: 7000 });
 }
@@ -154,8 +173,6 @@ function startError(e) {
 function recordingPanel(stream, spec) {
   let pip = null;
   const sets = [];
-  const video = h('video', { muted: true, autoplay: true, playsinline: true, class: 'rec-preview' });
-  video.srcObject = stream;
   const status = h('span', { class: 'status-line' });
   const popBtn = h('button', { class: 'btn btn-outline', type: 'button', onclick: () => openPip() }, icon('upload', 16), 'Pop out the controls');
   const inpage = controls(document, spec);
@@ -165,10 +182,11 @@ function recordingPanel(stream, spec) {
   const st = document.createElement('style');
   st.textContent = CTRL_CSS.replace('body{', ':host{display:block;border-radius:12px;overflow:hidden;');
   shadow.append(st, inpage.root);
-  const panel = h('div', { class: 'rec-panel', role: 'dialog', 'aria-label': 'Recording' },
-    h('div', { class: 'rec-card' }, host, video,
-      h('p', { class: 'modal-text', style: { margin: '12px 0 10px' } }, 'Switch to your app’s tab. ',
-        window.documentPictureInPicture ? 'Pop out the controls to keep them on top of your app.' : 'Come back to this tab to finish, or use “Stop sharing” in Chrome’s bar.'),
+  const mini = h('div', { class: 'rec-pill' }, h('span', { class: 'rec-dot-sm' }), 'Recording. Use the floating controls to capture steps or finish.');
+  const panel = h('div', { class: 'rec-panel', role: 'dialog', 'aria-label': 'Recording' }, mini,
+    h('div', { class: 'rec-card' }, host,
+      h('p', { class: 'modal-text', style: { margin: '12px 0 10px' } }, 'Now switch to your app’s tab. ',
+        window.documentPictureInPicture ? 'The small floating controls stay on top of it and are never recorded.' : 'Come back to this tab to finish, or use “Stop sharing” in Chrome’s bar.'),
       h('div', { class: 'row' }, window.documentPictureInPicture ? popBtn : null, status)));
   document.body.append(panel);
 
@@ -182,8 +200,9 @@ function recordingPanel(stream, spec) {
       const c = controls(pip.document, spec);
       sets.push(c);
       pip.document.body.append(c.root);
-      pip.addEventListener('pagehide', () => { pip = null; sets.splice(sets.indexOf(c), 1); popBtn.hidden = false; });
+      pip.addEventListener('pagehide', () => { pip = null; sets.splice(sets.indexOf(c), 1); popBtn.hidden = false; panel.classList.remove('rec-mini'); });
       popBtn.hidden = true;
+      panel.classList.add('rec-mini'); // the floating controls take over: no box in the middle
     } catch { popBtn.hidden = false; }
   }
   openPip(); // works if the Start click still counts as a user action
@@ -197,7 +216,7 @@ function recordingPanel(stream, spec) {
 
 async function beginSteps({ onDone, onSteps, motion, auto, trigger = 'change' }) {
   const rec = new ScreenRecorder({ motion, trigger });
-  try { await rec.start(); } catch (e) { startError(e); return; }
+  try { await rec.start(); } catch (e) { startError(e, () => beginSteps({ onDone, onSteps, motion, auto, trigger })); return; }
   let ended = false;
   const finish = async () => {
     if (ended) return; ended = true;
@@ -229,9 +248,11 @@ async function beginSteps({ onDone, onSteps, motion, auto, trigger = 'change' })
   };
   const ui = recordingPanel(rec.stream, {
     label: 'Recording',
-    hint: 'Link opened a new tab? Click “Share this tab instead” at the top of that tab.',
+    hint: trigger === 'manual' ? 'Press Capture step just before each click.'
+      : trigger === 'click' ? 'Each click makes a step. New tab? Use “Share this tab instead”.'
+      : 'Link opened a new tab? Click “Share this tab instead” at the top of that tab.',
     count: () => `${rec.count}`,
-    extra: rec.motion && trigger !== 'click' ? () => `${rec.clips} clip${rec.clips === 1 ? '' : 's'}` : null,
+    extra: rec.motion && trigger === 'change' ? () => `${rec.clips} clip${rec.clips === 1 ? '' : 's'}` : null,
     buttons: [
       { text: 'Capture step', run: () => { if (rec.captureNow()) ui.update(true); } },
       { text: 'Finish', cls: 'fin', run: finish },

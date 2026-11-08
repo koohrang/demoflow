@@ -536,3 +536,7 @@ a.app-version:hover { color: #fff; }
 .trig strong { font-size: 13.5px; }
 .trig small { font-size: 12px; color: var(--muted); line-height: 1.35; }
 .trig[aria-pressed="true"] { border-color: var(--indigo); box-shadow: 0 0 0 3px var(--indigo-tint); background: #FBFBFF; }
+.rec-pill { display: none; }
+.rec-panel.rec-mini { background: none; pointer-events: none; place-items: end center; }
+.rec-panel.rec-mini .rec-card { display: none; }
+.rec-panel.rec-mini .rec-pill { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px; padding: 8px 14px; border-radius: 999px; background: var(--navy); color: #fff; font: 600 13px/1 var(--font); box-shadow: var(--shadow-pop); pointer-events: auto; }

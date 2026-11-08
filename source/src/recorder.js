@@ -52,14 +52,27 @@ function ticker(ms, fn) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function shareTab(frameRate) {
-  return navigator.mediaDevices.getDisplayMedia({
-    video: { displaySurface: 'browser', frameRate: { ideal: frameRate, max: 30 }, cursor: 'always' },
+// Only a browser tab: a tab recording never contains Demoflow's own controls,
+// other windows or the desktop. Chrome scales the picture down to at most
+// 1920 px before handing it over, which keeps Retina screens smooth.
+async function shareTab(frameRate, { tabOnly = true } = {}) {
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: { displaySurface: 'browser', frameRate: { ideal: frameRate, max: 30 }, width: { max: 1920 }, height: { max: 1200 } },
     audio: false,
     selfBrowserSurface: 'exclude',
     surfaceSwitching: 'include',
+    monitorTypeSurfaces: tabOnly ? 'exclude' : 'include',
     preferCurrentTab: false,
   });
+  const track = stream.getVideoTracks()[0];
+  const surface = track && track.getSettings ? track.getSettings().displaySurface : '';
+  if (tabOnly && surface && surface !== 'browser') {
+    stream.getTracks().forEach((t) => t.stop());
+    const e = new Error('Please share a Chrome tab, not a window or your whole screen.');
+    e.name = 'NotTabError'; e.surface = surface;
+    throw e;
+  }
+  return stream;
 }
 
 // Real length of a recorded clip. Tab capture only delivers frames when the
@@ -101,7 +114,8 @@ export class ScreenRecorder {
   //          'click'  = a new step only when you click (needs the Click Helper).
   constructor({ onUpdate, motion = true, full = true, trigger = 'change' } = {}) {
     this.trigger = trigger;
-    this.full = full || trigger === 'click';
+    this.explicit = trigger === 'click' || trigger === 'manual'; // steps only on purpose, never from screen changes
+    this.full = full || this.explicit;
     this.onUpdate = onUpdate || (() => {});
     this.motion = motion && videoRecordingSupported();
     this.steps = [];          // committed: { small, w, h, hotspot, highlight, unsure, blobPromise, motion }
@@ -268,7 +282,7 @@ export class ScreenRecorder {
     // Handle each still screen once (thumbnails keep arriving while a caret blinks).
     if (this.settledSmall && this._diff(this.prev.small, this.settledSmall).share <= ANY_CHANGE) return;
     this.settledSmall = this.prev.small;
-    if (this.trigger !== 'click') this._setCandidate(this.prev);
+    if (!this.explicit) this._setCandidate(this.prev);
   }
 
   _analyse({ bmp, ts }) {
@@ -280,7 +294,7 @@ export class ScreenRecorder {
     const cur = { small, bmp, t: now, ts };
     const off = ts / 1000 - now;
     if (this.tsOff == null || off > this.tsOff) this.tsOff = off; // least-delayed frame wins
-    if (this.trigger === 'click' && !this.startStep) {
+    if (this.explicit && !this.startStep) {
       // The screen when recording began, in case there's movement before the first click.
       this.startStep = { small, unsure: false, hotspot: { x: 0.5, y: 0.5 }, highlight: null, start: true, clickTs: ts, frameT: now };
       this.startStep.shot = this.cw ? this._shot({}) : this._shot(cur);
@@ -294,7 +308,7 @@ export class ScreenRecorder {
       this.lastChangeAt = now;
       this.lastChangeTs = ts;
     }
-    if (this.trigger === 'click') { /* steps come from clicks only */ } else if (this.cand) {
+    if (this.explicit) { /* steps come from clicks only */ } else if (this.cand) {
       const vsCand = this._diff(small, this.cand.small);
       if (vsCand.share > STEP_CHANGE) {
         const old = this.cand;
@@ -420,7 +434,7 @@ export class ScreenRecorder {
   captureNow() {
     const f = this.latest;
     if (!f) return false;
-    if (this.trigger === 'click') {
+    if (this.explicit) {
       const now = performance.now();
       const step = { small: f.small, unsure: true, hotspot: { x: 0.5, y: 0.5 }, highlight: null, clickTs: this._tsAt(now), frameT: now, leftAt: now };
       step.shot = this.cw ? this._shot({}) : this._shot(f);
@@ -439,7 +453,7 @@ export class ScreenRecorder {
   // finalStep: treat the last screen as the closing step of a new demo.
   async collectSteps({ finalStep = true, auto = false } = {}) {
     if (this.stopped || this.finishing) return [];
-    if (this.trigger === 'click') return this._collectClickSteps({ finalStep, auto });
+    if (this.explicit) return this._collectClickSteps({ finalStep, auto });
     this.finishing = true;
     const final = this.cand || this.latest;
     if (final) {
@@ -640,7 +654,7 @@ export class ScreenRecorder {
 // Uses the frame-accurate encoder when available (smooth 30 fps), otherwise MediaRecorder.
 export class ClipRecorder {
   async start() {
-    this.stream = await shareTab(30);
+    this.stream = await shareTab(30, { tabOnly: false });
     this.track = this.stream.getVideoTracks()[0];
     this.track.addEventListener('ended', () => { if (!this.stopped && this.onEnded) this.onEnded(); });
     this.t0 = performance.now();
